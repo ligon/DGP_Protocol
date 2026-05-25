@@ -19,7 +19,7 @@ dependencies (pytest, ruff, black, mypy) are managed by poetry.
 
 ## Development workflow
 
-The three quality gates that must pass before a PR lands:
+The four quality gates that must pass before a PR lands:
 
 ```sh
 poetry run ruff check .
