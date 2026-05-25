@@ -1,0 +1,86 @@
+#+TITLE: DGP_Protocol
+#+AUTHOR: Ethan Ligon
+#+OPTIONS: toc:nil num:nil
+
+A minimal Python Protocol for data-generating processes (DGPs).
+
+* What this is
+
+A *Protocol* (~DataGeneratingProcess~) with two members --
+~data~ (a frozen property returning the observed realization)
+and ~draw(size=..., *, rng=...)~ (a method returning a fresh
+realization) -- plus a small set of composition primitives
+(~TwoStageDGP~, ~with_data~) and thin convenience wrappers
+(~EmpiricalDGP~, ~ParametricDGP~) for working with DGPs as
+first-class objects.
+
+The package is *not* a library of working DGPs.  Concrete DGPs
+live in *consumer* packages -- e.g.\\
+[[https://github.com/ligon/ManifoldGMM][ManifoldGMM]] ships its
+own moment-side DGPs.  The role of ~DGP_Protocol~ is to define
+the contract that lets such consumers interoperate.
+
+* Conceptual lineage
+
+The Protocol promotes the *stand-in distribution* from
+Manski's analog estimation framework (Manski 1988,
+/Analog Estimation Methods in Econometrics/) to a first-class
+Python object.  In that framework, an estimator is defined by a
+population functional plus a sample-based stand-in for the
+population; ~DataGeneratingProcess~ is that stand-in.  Different
+stand-ins yield different analog estimators:
+
+- The empirical distribution -> nonparametric plug-in estimators.
+- A parametric family fitted to the data -> MLE-style estimators.
+- A bootstrap distribution -> bootstrap inference.
+- A null-imposed restriction -> constrained estimators.
+
+* Installation
+
+#+begin_src bash
+pip install DGP_Protocol
+#+end_src
+
+The import path is PEP-8 lowercase:
+
+#+begin_src python
+from dgp_protocol import DataGeneratingProcess, EmpiricalDGP, TwoStageDGP
+#+end_src
+
+* Minimal example
+
+#+begin_src python
+import numpy as np
+from dgp_protocol import EmpiricalDGP
+
+rng = np.random.default_rng(0)
+data = rng.standard_normal(size=(100, 3))
+
+dgp = EmpiricalDGP(observation=data)
+print(dgp.data.shape)                  # (100, 3) -- the frozen realization
+print(dgp.draw(rng=rng).shape)         # (100, 3) -- a fresh bootstrap resample
+
+# Rebind to a different realization while keeping the distributional structure.
+fresh = dgp.with_data(rng.standard_normal(size=(50, 3)))
+print(fresh.data.shape)                # (50, 3)
+#+end_src
+
+See the [[file:docs/][docs/]] directory for more substantial examples,
+including parametric DGPs and two-stage composition (hierarchical
+sampling).
+
+* Design
+
+See =docs/design/= for the design note that motivates the
+Protocol's surface.  The design is intentionally minimal:
+=data= + =draw= are the only required members.  Composition
+primitives (~TwoStageDGP~, ~bootstrap_dgp~, ~with_data~) take
+DGPs and return DGPs without expanding the Protocol.
+
+* License
+
+CC-BY-NC-SA-4.0.  See =pyproject.toml=.
+
+* Author
+
+Ethan Ligon, UC Berkeley.

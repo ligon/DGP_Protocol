@@ -1,0 +1,57 @@
+[project]
+name = "DGP_Protocol"
+version = "0.1.0a0"
+description = "A Protocol for data-generating processes; minimal interface for analog-estimation toolkits."
+readme = "README.org"
+requires-python = ">=3.11,<4.0"
+license = { text = "CC-BY-NC-SA-4.0" }
+authors = [{ name = "Ethan Ligon", email = "ligon@berkeley.edu" }]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "License :: Other/Proprietary License",
+  "Operating System :: OS Independent",
+  "Topic :: Scientific/Engineering :: Mathematics",
+]
+dependencies = [
+  "numpy>=1.26",
+]
+
+[tool.poetry]
+package-mode = true
+packages = [{ include = "dgp_protocol", from = "src" }]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<4.0"
+numpy = ">=1.26"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.2.0"
+ruff = "^0.5.4"
+black = "^24.4.2"
+mypy = "^1.10.0"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.black]
+target-version = ["py311"]
+line-length = 88
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_ignores = true
+ignore_missing_imports = true
+strict_optional = true
+
+[build-system]
+requires = ["poetry-core>=1.7.0"]
+build-backend = "poetry.core.masonry.api"
