@@ -1,7 +1,9 @@
 """Fair-coin Bernoulli: the smallest interesting ParametricDGP.
 
 Illustrative; not part of the public ``dgp_protocol`` API.  See
-``AGENTS.md`` §1 for why concrete DGPs do not live under ``src/``.
+``AGENTS.md`` §1 for why concrete DGPs do not live in the package
+proper (``dgp_protocol/``) and are kept out under ``examples/`` or
+in consumer packages instead.
 
 This file constructs a ``ParametricDGP`` for the distribution
 
@@ -51,6 +53,7 @@ symbols) land in your namespace::
 from __future__ import annotations
 
 import numpy as np
+
 from dgp_protocol import DataGeneratingProcess, ParametricDGP
 
 

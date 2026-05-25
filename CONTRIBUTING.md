@@ -24,7 +24,7 @@ The three quality gates that must pass before a PR lands:
 ```sh
 poetry run ruff check .
 poetry run black --check .
-poetry run mypy src tests
+poetry run mypy dgp_protocol tests
 poetry run pytest
 ```
 

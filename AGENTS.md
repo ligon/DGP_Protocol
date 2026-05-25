@@ -139,7 +139,7 @@ useful to ManifoldGMM, **file it on ManifoldGMM, not here**.
 - `poetry install` to set up the dev environment.
 - `poetry run pytest` for tests.
 - `poetry run ruff check .`, `poetry run black --check .`,
-  `poetry run mypy src tests` are the gates.  All three must pass
+  `poetry run mypy dgp_protocol tests` are the gates.  All three must pass
   before a commit lands.
 - No `Makefile` yet; commands are run via `poetry run` directly.
 
