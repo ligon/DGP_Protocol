@@ -14,12 +14,17 @@ readability.
 
 The realization shape is the tabular ``(N, p)`` convention used in the
 test suite: ``N`` rows of observations, ``p == 1`` column for this
-univariate case.  Switching to a bare ``(N,)`` would break that
-convention without simplifying anything important here.
+univariate case.
 
 The DGP carries no observed realization (``observation=None``); it is a
 pure Monte Carlo specification.  Bind one with ``dgp.with_data(obs)``
 if you want ``dgp.data`` to return something.
+
+The DGP owns its own Generator.  ``seed=0`` here makes the draws
+reproducible across runs; pass ``seed=None`` (or omit) for system-
+entropy seeding.  ``dgp.draw()`` never takes an ``rng`` argument; use
+``dgp.with_rng(rng)`` to swap in a specific Generator for parallel
+fan-out.
 
 Run directly::
 
@@ -54,6 +59,7 @@ DEFAULT_SHAPE: tuple[int, int] = (100, 1)
 dgp = ParametricDGP(
     generator=fair_coin,
     default_shape=DEFAULT_SHAPE,
+    seed=0,
 )
 
 
@@ -64,14 +70,12 @@ def _demo() -> None:
     assert isinstance(dgp, DataGeneratingProcess)
     assert dgp.data is None
 
-    rng = np.random.default_rng(0)
-
-    sample = dgp.draw(rng=rng)
+    sample = dgp.draw()
     print(f"default draw: shape={sample.shape}  dtype={sample.dtype}")
     print(f"  sample mean ({sample.shape[0]} draws) = {float(sample.mean()):.4f}")
 
     # Explicit ``size`` overrides ``default_shape``.
-    big = dgp.draw(size=(10_000, 1), rng=rng)
+    big = dgp.draw(size=(10_000, 1))
     print(f"sized draw:   shape={big.shape}")
     print(f"  sample mean ({big.shape[0]:,} draws) = {float(big.mean()):.4f}")
 

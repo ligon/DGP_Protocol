@@ -53,15 +53,17 @@ from dgp_protocol import DataGeneratingProcess, EmpiricalDGP, TwoStageDGP
 import numpy as np
 from dgp_protocol import EmpiricalDGP
 
-rng = np.random.default_rng(0)
-data = rng.standard_normal(size=(100, 3))
+data = np.random.default_rng(0).standard_normal(size=(100, 3))
 
-dgp = EmpiricalDGP(observation=data)
+# The DGP owns its own RNG.  Pass `seed` for reproducibility;
+# `draw()` itself takes no `rng` argument.
+dgp = EmpiricalDGP(observation=data, seed=1)
 print(dgp.data.shape)                  # (100, 3) -- the frozen realization
-print(dgp.draw(rng=rng).shape)         # (100, 3) -- a fresh bootstrap resample
+print(dgp.draw().shape)                # (100, 3) -- a fresh bootstrap resample
 
-# Rebind to a different realization while keeping the distributional structure.
-fresh = dgp.with_data(rng.standard_normal(size=(50, 3)))
+# Rebind to a different realization while keeping the distributional
+# structure.  The child gets an independent (spawned) Generator.
+fresh = dgp.with_data(np.random.default_rng(2).standard_normal(size=(50, 3)))
 print(fresh.data.shape)                # (50, 3)
 #+end_src
 

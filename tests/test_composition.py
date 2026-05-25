@@ -20,26 +20,27 @@ def test_two_stage_draw_returns_per_cluster_list() -> None:
     """A two-stage DGP returns a list of per-cluster realizations.
 
     Outer draws cluster characteristics; inner is a callable that
-    returns a DGP for each cluster.
+    builds a DGP for each cluster, given a per-cluster Generator.
     """
-
-    rng = np.random.default_rng(0)
 
     # Outer: 3 clusters, each characterised by a single scalar.
     cluster_chars = np.array([[1.0], [2.0], [3.0]])
-    outer = EmpiricalDGP(observation=cluster_chars)
+    outer = EmpiricalDGP(observation=cluster_chars, seed=1)
 
     # Inner: each cluster has an iid Gaussian draw with std equal to
-    # the cluster's scalar characteristic.
-    def make_inner(chars):
+    # the cluster's scalar characteristic.  Uses the per-cluster rng
+    # via ``with_rng`` so the composite's seed drives within-cluster
+    # randomness deterministically.
+    def make_inner(chars, rng):
         sigma = float(chars[0])
-        return ParametricDGP(
-            generator=lambda rng, shape: sigma * rng.standard_normal(shape),
+        base = ParametricDGP(
+            generator=lambda rng_inner, shape: sigma * rng_inner.standard_normal(shape),
             default_shape=(5, 2),
         )
+        return base.with_rng(rng)
 
-    ts = TwoStageDGP(outer=outer, inner=make_inner)
-    realization = ts.draw(rng=rng)
+    ts = TwoStageDGP(outer=outer, inner=make_inner, seed=0)
+    realization = ts.draw()
 
     assert isinstance(realization, list)
     assert len(realization) == 3  # one per cluster
@@ -47,33 +48,34 @@ def test_two_stage_draw_returns_per_cluster_list() -> None:
         assert cluster_draw.shape == (5, 2)
 
 
-def test_two_stage_inner_called_with_cluster_chars() -> None:
-    """The ``inner`` callable receives the cluster row each time."""
+def test_two_stage_inner_called_with_cluster_chars_and_rng() -> None:
+    """The ``inner`` callable receives the cluster row plus an rng."""
 
     cluster_chars = np.array([[10.0], [20.0]])
-    outer = EmpiricalDGP(observation=cluster_chars)
+    outer = EmpiricalDGP(observation=cluster_chars, seed=0)
 
     seen_chars = []
+    seen_rngs = []
 
-    def make_inner(chars):
+    def make_inner(chars, rng):
         seen_chars.append(chars.copy())
+        seen_rngs.append(rng)
         # Inner is degenerate: always returns zeros.
         return ParametricDGP(
-            generator=lambda rng, shape: np.zeros(shape),
+            generator=lambda rng_inner, shape: np.zeros(shape),
             default_shape=(1, 1),
         )
 
-    ts = TwoStageDGP(outer=outer, inner=make_inner)
-    # Set a fixed RNG for outer so we know which clusters get drawn.
-    rng_local = np.random.default_rng(42)
-    _ = ts.draw(rng=rng_local)
+    ts = TwoStageDGP(outer=outer, inner=make_inner, seed=42)
+    _ = ts.draw()
 
     # ``inner`` was called once per outer-drawn cluster.
     assert len(seen_chars) == cluster_chars.shape[0]
-    # Each ``chars`` is one row of the outer's draw, so values are
-    # in {10.0, 20.0}.
     seen_values = {float(c[0]) for c in seen_chars}
     assert seen_values.issubset({10.0, 20.0})
+    # Each ``rng`` is a numpy Generator and distinct across clusters.
+    assert all(isinstance(r, np.random.Generator) for r in seen_rngs)
+    assert seen_rngs[0] is not seen_rngs[1]
 
 
 def test_two_stage_recursive_composition() -> None:
@@ -82,30 +84,37 @@ def test_two_stage_recursive_composition() -> None:
     Demonstrates that ``inner`` can return another :class:`TwoStageDGP`.
     """
 
-    rng = np.random.default_rng(0)
-
     # Top-level: 2 regions, each characterised by a scalar.
     region_chars = np.array([[100.0], [200.0]])
-    region_dgp = EmpiricalDGP(observation=region_chars)
+    region_dgp = EmpiricalDGP(observation=region_chars, seed=0)
 
-    def make_cluster_dgp_within_region(region_chars_row):
+    def make_cluster_dgp_within_region(region_chars_row, region_rng):
         # Each region has 3 clusters, each characterised by the
         # region characteristic times a small jitter.
         base = float(region_chars_row[0])
         cluster_chars = np.array([[base + 1], [base + 2], [base + 3]])
-        cluster_dgp = EmpiricalDGP(observation=cluster_chars)
+        cluster_dgp = EmpiricalDGP(observation=cluster_chars, seed=0)
 
-        def make_observation_dgp(cluster_chars_row):
-            return ParametricDGP(
-                generator=lambda rng, shape: np.zeros(shape) + cluster_chars_row[0],
+        def make_observation_dgp(cluster_chars_row, obs_rng):
+            base_dgp = ParametricDGP(
+                generator=lambda rng_inner, shape: np.zeros(shape)
+                + cluster_chars_row[0],
                 default_shape=(1, 1),
             )
+            return base_dgp.with_rng(obs_rng)
 
-        return TwoStageDGP(outer=cluster_dgp, inner=make_observation_dgp)
+        # Inject ``region_rng`` as the inner TwoStageDGP's own spawn
+        # source so the whole composition is reproducible from the
+        # top-level seed.
+        return TwoStageDGP(outer=cluster_dgp, inner=make_observation_dgp).with_rng(
+            region_rng
+        )
 
-    three_stage = TwoStageDGP(outer=region_dgp, inner=make_cluster_dgp_within_region)
+    three_stage = TwoStageDGP(
+        outer=region_dgp, inner=make_cluster_dgp_within_region, seed=1
+    )
 
-    realization = three_stage.draw(rng=rng)
+    realization = three_stage.draw()
     # Outer (region) realization has 2 rows -> 2 list entries.
     assert len(realization) == 2
     # Each entry is itself a list (the second-stage's per-cluster realizations).
@@ -120,11 +129,11 @@ def test_two_stage_with_data_preserves_structure() -> None:
     cluster_chars = np.array([[1.0], [2.0]])
     outer = EmpiricalDGP(observation=cluster_chars)
 
-    def make_inner(c):
+    def make_inner(c, rng):
         return ParametricDGP(
-            generator=lambda rng, shape: rng.standard_normal(shape),
+            generator=lambda rng_inner, shape: rng_inner.standard_normal(shape),
             default_shape=(1, 1),
-        )
+        ).with_rng(rng)
 
     ts1 = TwoStageDGP(outer=outer, inner=make_inner)
     fake_realization = ("placeholder", "object")
@@ -135,6 +144,30 @@ def test_two_stage_with_data_preserves_structure() -> None:
     assert ts2.inner is ts1.inner
     assert ts2.data == fake_realization
     assert ts1.data is None  # unchanged
+
+
+def test_two_stage_seeded_is_reproducible() -> None:
+    """Two TwoStageDGPs with identically-seeded constituents agree on draws."""
+
+    cluster_chars = np.array([[1.0], [2.0], [3.0]])
+
+    def build():
+        outer = EmpiricalDGP(observation=cluster_chars, seed=7)
+
+        def make_inner(chars, rng):
+            return ParametricDGP(
+                generator=lambda rng_inner, shape: rng_inner.standard_normal(shape),
+                default_shape=(4, 1),
+            ).with_rng(rng)
+
+        return TwoStageDGP(outer=outer, inner=make_inner, seed=99)
+
+    a, b = build(), build()
+    realizations_a = a.draw()
+    realizations_b = b.draw()
+    assert len(realizations_a) == len(realizations_b)
+    for ra, rb in zip(realizations_a, realizations_b, strict=True):
+        np.testing.assert_array_equal(ra, rb)
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +194,7 @@ def test_with_data_raises_for_dgp_without_method() -> None:
         def data(self):
             return None
 
-        def draw(self, size=None, *, rng):
+        def draw(self, size=None):
             return None
 
     dgp = _BareDGP()
@@ -178,9 +211,12 @@ def test_two_stage_dgp_satisfies_protocol() -> None:
     """A TwoStageDGP is itself a DataGeneratingProcess by structural typing."""
 
     outer = EmpiricalDGP(observation=np.array([[1.0]]))
-    inner = lambda c: ParametricDGP(  # noqa: E731
-        generator=lambda rng, shape: rng.standard_normal(shape),
-        default_shape=(1, 1),
-    )
+
+    def inner(c, rng):
+        return ParametricDGP(
+            generator=lambda rng_inner, shape: rng_inner.standard_normal(shape),
+            default_shape=(1, 1),
+        ).with_rng(rng)
+
     ts = TwoStageDGP(outer=outer, inner=inner)
     assert isinstance(ts, DataGeneratingProcess)

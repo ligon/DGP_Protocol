@@ -17,6 +17,15 @@ Recursive composition (3+ stages, clusters-within-clusters) is
 supported by nesting: the ``inner`` of a :class:`TwoStageDGP` can
 itself return :class:`TwoStageDGP` instances.
 
+Randomness:  A :class:`TwoStageDGP` owns its own RNG (set via the
+``seed`` constructor kwarg, default system entropy).  On each draw
+the composite spawns one independent child Generator per cluster
+and passes it to the ``inner`` callable.  The composite's own seed
+therefore drives *all* per-cluster within-cluster randomness
+deterministically; the outer DGP's own RNG drives the cluster-
+characteristic draw.  Seeding both the outer DGP and the composite
+makes a top-level :meth:`TwoStageDGP.draw` fully reproducible.
+
 A ``bootstrap_dgp(...)`` constructor for resampling-based derived
 DGPs is intentionally **not** implemented in this initial release.
 The cluster-(block-)bootstrap of raw data is available via
@@ -53,18 +62,27 @@ class TwoStageDGP:
         per cluster.  The columns carry whatever cluster
         characteristics the inner DGP needs to condition on.
     inner:
-        A callable ``cluster_chars -> DataGeneratingProcess`` mapping
-        a single cluster's characteristics (one row of the outer
-        draw) to the DGP describing that cluster's within-cluster
-        observations.  When the inner is independent of cluster
-        characteristics (purely iid within-cluster), the callable
-        degenerates to ``lambda c: fixed_inner_dgp``.
+        A callable ``(cluster_chars, rng) -> DataGeneratingProcess``
+        mapping a single cluster's characteristics (one row of the
+        outer draw) plus a per-cluster Generator to the DGP describing
+        that cluster's within-cluster observations.  The ``rng`` is
+        spawned by the composite for each cluster; the callable
+        typically installs it via ``inner_dgp.with_rng(rng)`` (or
+        constructs the inner DGP with whatever seed convention the
+        user prefers).  When the inner is independent of cluster
+        characteristics, the callable degenerates to
+        ``lambda chars, rng: fixed_inner_dgp.with_rng(rng)``.
     observation:
         Optional observed realization to expose via :attr:`data`.
         ``None`` means "no observed data yet".  The stitching of the
         observation is the caller's responsibility -- if you have
         cluster + observation data, pre-stitch into the flat-matrix
         form and pass via ``observation``.
+    seed:
+        Optional integer seed for the composite's own Generator,
+        used to spawn the per-cluster child rngs that get passed to
+        ``inner``.  Does *not* control the outer DGP's randomness
+        (that belongs to the outer DGP's own seed).
 
     Returns
     -------
@@ -76,56 +94,73 @@ class TwoStageDGP:
     The current implementation returns ``draw`` realizations as a
     Python list of per-cluster numpy arrays.  Downstream consumers
     typically prefer a flat-matrix + cluster-id-array representation
-    -- the choice is an open design point (see ``docs/design/dgp.org``
-    in this repository's history).  Callers wanting a flat layout
-    should post-process with :func:`numpy.vstack` and a
+    -- the choice is an open design point.  Callers wanting a flat
+    layout should post-process with :func:`numpy.vstack` and a
     cluster-id-array constructed from per-cluster lengths.
     """
 
     outer: DataGeneratingProcess
-    inner: Callable[[Any], DataGeneratingProcess]
+    inner: Callable[[Any, np.random.Generator], DataGeneratingProcess]
     observation: Any = field(default=None)
+    seed: int | None = None
+    _rng: np.random.Generator = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "_rng", np.random.default_rng(self.seed))
 
     @property
     def data(self) -> Any:
         return self.observation
 
-    def draw(
-        self,
-        size: tuple[int, ...] | None = None,
-        *,
-        rng: np.random.Generator,
-    ) -> Any:
+    def draw(self, size: tuple[int, ...] | None = None) -> Any:
         """Draw via two-stage simulation: clusters then within-cluster rows.
 
         Returns a list of per-cluster realizations; see the class
-        docstring for the choice of return type.
+        docstring for the choice of return type.  One independent
+        Generator is spawned per cluster from the composite's own
+        Generator and passed to ``inner``.
         """
 
-        cluster_rows = self.outer.draw(size=size, rng=rng)
+        cluster_rows = self.outer.draw(size=size)
         cluster_rows_arr = np.asarray(cluster_rows)
-        # ``inner`` is called once per cluster row.  Each inner DGP
-        # gets its own draw with the supplied rng (consumes state
-        # in order).
         per_cluster: list[Any] = []
         for cluster_chars in cluster_rows_arr:
-            inner_dgp = self.inner(cluster_chars)
-            per_cluster.append(inner_dgp.draw(rng=rng))
+            child_rng = self._rng.spawn(1)[0]
+            inner_dgp = self.inner(cluster_chars, child_rng)
+            per_cluster.append(inner_dgp.draw())
         return per_cluster
 
     def with_data(self, observation: Any) -> TwoStageDGP:
         """Return a new TwoStageDGP bound to a different observed realization.
 
-        Preserves the outer/inner structure.  The caller is
-        responsible for ensuring the new observation is compatible
-        with the composite's structural assumptions.
+        Preserves the outer/inner structure; the child receives an
+        *independent* Generator spawned from the parent's stream.
+        The caller is responsible for ensuring the new observation
+        is compatible with the composite's structural assumptions.
         """
 
-        return TwoStageDGP(
+        return self._rebuild(observation=observation, rng=self._rng.spawn(1)[0])
+
+    def with_rng(self, rng: np.random.Generator) -> TwoStageDGP:
+        """Return a new TwoStageDGP that uses ``rng`` as its Generator.
+
+        Only the composite's own spawn-source changes; the outer DGP's
+        Generator is unaffected.  See :meth:`with_data` for the
+        bootstrap-fan-out idiom.
+        """
+
+        return self._rebuild(observation=self.observation, rng=rng)
+
+    def _rebuild(self, *, observation: Any, rng: np.random.Generator) -> TwoStageDGP:
+        """Construct a sibling with a specific ``rng`` installed."""
+
+        new = TwoStageDGP(
             outer=self.outer,
             inner=self.inner,
             observation=observation,
         )
+        object.__setattr__(new, "_rng", rng)
+        return new
 
 
 def with_data(dgp: DataGeneratingProcess, observation: Any) -> Any:

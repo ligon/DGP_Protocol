@@ -34,14 +34,18 @@ def test_arbitrary_object_does_not_satisfy_protocol() -> None:
 
 
 def test_minimal_duck_satisfies_protocol() -> None:
-    """An ad-hoc duck-typed object with the right shape passes."""
+    """An ad-hoc duck-typed object with the right shape passes.
+
+    ``draw`` takes only ``size`` -- the DGP owns its own rng, so the
+    Protocol does not declare an ``rng`` parameter.
+    """
 
     class _DuckDGP:
         @property
         def data(self):
             return None
 
-        def draw(self, size=None, *, rng):
+        def draw(self, size=None):
             return None
 
     assert isinstance(_DuckDGP(), DataGeneratingProcess)
