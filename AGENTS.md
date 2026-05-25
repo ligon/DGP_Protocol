@@ -145,10 +145,26 @@ useful to ManifoldGMM, **file it on ManifoldGMM, not here**.
 
 ### Git
 
-- Commits authored by `Coder <coder@example.com>` (the sucoder coder
-  account's git config — do NOT change).
+- Commits are authored by a **human** (the git `user.name` /
+  `user.email` already configured on the sucoder coder account
+  resolves to a real person — currently
+  `Ethan Ligon & Sue Coder <ligon+sucoder@berkeley.edu>`).  Do
+  NOT change the git config; do NOT substitute a non-human author
+  (neither `Coder` nor any AI agent can hold copyright, so neither
+  can be the `Author`).
 - AI agent identity goes in the `Co-Authored-By:` trailer.  Example:
-  `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>`.
+  `Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>`.
+  If you genuinely don't know your model version, look it up
+  before fabricating — under Claude Code the model name is
+  recorded per assistant turn in the session jsonl, e.g.
+
+  ```sh
+  find ~/.claude/projects -name "${CLAUDE_CODE_SESSION_ID}.jsonl" \
+    -exec grep -m1 -oE '"model":"[^"]*"' {} \;
+  ```
+
+  Only fall back to `Anthropic Claude, version unknown
+  <noreply@anthropic.com>` if no such record exists.
 - Pushes go directly to GitHub over HTTPS (the `coder` account cannot
   push to the ligon-side mirror).  `gh auth setup-git` is already
   configured.
