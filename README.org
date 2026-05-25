@@ -65,17 +65,23 @@ fresh = dgp.with_data(rng.standard_normal(size=(50, 3)))
 print(fresh.data.shape)                # (50, 3)
 #+end_src
 
-See the [[file:docs/][docs/]] directory for more substantial examples,
-including parametric DGPs and two-stage composition (hierarchical
-sampling).
+For more substantial examples -- parametric DGPs, two-stage
+composition (hierarchical sampling), cluster-block bootstrap --
+see the test suite under [[file:tests/][tests/]].
 
 * Design
 
-See =docs/design/= for the design note that motivates the
-Protocol's surface.  The design is intentionally minimal:
-=data= + =draw= are the only required members.  Composition
-primitives (~TwoStageDGP~, ~bootstrap_dgp~, ~with_data~) take
-DGPs and return DGPs without expanding the Protocol.
+The design is intentionally minimal: =data= + =draw= are the
+only required members.  Composition primitives (~TwoStageDGP~,
+~with_data~) take DGPs and return DGPs without expanding the
+Protocol.
+
+The design note that motivated this package lives in the sibling
+[[https://github.com/ligon/ManifoldGMM][ManifoldGMM]] repo at
+=docs/design/dgp.org= -- DGP_Protocol was extracted from that
+design conversation.  See also [[file:AGENTS.md][AGENTS.md]] for
+the package's scope discipline and the list of intentionally
+deferred features.
 
 * How to cite
 
