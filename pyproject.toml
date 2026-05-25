@@ -4,12 +4,12 @@ version = "0.1.0a0"
 description = "A Protocol for data-generating processes; minimal interface for analog-estimation toolkits."
 readme = "README.org"
 requires-python = ">=3.11,<4.0"
-license = { text = "CC-BY-NC-SA-4.0" }
+license = { text = "BSD-3-Clause" }
 authors = [{ name = "Ethan Ligon", email = "ligon@berkeley.edu" }]
 classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",
-  "License :: Other/Proprietary License",
+  "License :: OSI Approved :: BSD License",
   "Operating System :: OS Independent",
   "Topic :: Scientific/Engineering :: Mathematics",
 ]

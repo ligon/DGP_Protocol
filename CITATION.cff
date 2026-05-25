@@ -1,0 +1,39 @@
+cff-version: 1.2.0
+message: "If you use DGP_Protocol in academic work, please cite it as follows."
+type: software
+title: "DGP_Protocol: A Protocol for data-generating processes"
+abstract: >-
+  A minimal Python Protocol for data-generating processes (DGPs), with
+  thin convenience wrappers and composition primitives.  Designed as a
+  foundational dependency for analog-estimation toolkits in the sense
+  of Manski (1988).
+authors:
+  - family-names: Ligon
+    given-names: Ethan
+    affiliation: "University of California, Berkeley"
+    email: ligon@berkeley.edu
+url: "https://github.com/ligon/DGP_Protocol"
+repository-code: "https://github.com/ligon/DGP_Protocol"
+license: BSD-3-Clause
+version: 0.1.0a0
+date-released: "2026-05-25"
+keywords:
+  - econometrics
+  - statistics
+  - analog-estimation
+  - data-generating-process
+  - bootstrap
+  - protocol
+  - python
+references:
+  - type: book
+    title: "Analog Estimation Methods in Econometrics"
+    authors:
+      - family-names: Manski
+        given-names: "Charles F."
+    year: 1988
+    publisher:
+      name: "Chapman and Hall"
+    notes: >-
+      Conceptual lineage.  DGP_Protocol's stand-in distribution
+      abstraction follows Manski's analog-estimation framework.

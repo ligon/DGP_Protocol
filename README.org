@@ -77,9 +77,34 @@ Protocol's surface.  The design is intentionally minimal:
 primitives (~TwoStageDGP~, ~bootstrap_dgp~, ~with_data~) take
 DGPs and return DGPs without expanding the Protocol.
 
+* How to cite
+
+If you use DGP_Protocol in academic work, please cite it.  The
+repository's =CITATION.cff= is recognised by GitHub and provides
+one-click citation export in APA, BibTeX, and other formats from
+the repo's main page.
+
+A BibTeX entry suitable for paper drafts:
+
+#+begin_src bibtex
+@software{ligon_dgp_protocol_2026,
+  author    = {Ligon, Ethan},
+  title     = {DGP\_Protocol: A Protocol for data-generating processes},
+  year      = {2026},
+  publisher = {GitHub},
+  url       = {https://github.com/ligon/DGP_Protocol},
+  version   = {0.1.0a0},
+  license   = {BSD-3-Clause},
+}
+#+end_src
+
 * License
 
-CC-BY-NC-SA-4.0.  See =pyproject.toml=.
+BSD 3-Clause (=BSD-3-Clause=).  See the =LICENSE= file at the root
+of this repository.  In short: permissive use including commercial,
+modification, and redistribution; preserve the copyright notice and
+license text in redistributions; no use of the author's name to
+endorse derived products.
 
 * Author
 
