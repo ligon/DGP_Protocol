@@ -43,11 +43,12 @@ from typing import Any
 
 import numpy as np
 
+from .distribution import DistributionalFeatures
 from .protocol import DataGeneratingProcess
 
 
 @dataclass(frozen=True)
-class TwoStageDGP:
+class TwoStageDGP(DistributionalFeatures):
     """Hierarchical two-stage DGP.
 
     Clusters are drawn from an outer DGP; within each cluster, rows
@@ -129,6 +130,37 @@ class TwoStageDGP:
             inner_dgp = self.inner(cluster_chars, child_rng)
             per_cluster.append(inner_dgp.draw())
         return per_cluster
+
+    # ---------------------------------------------------------------
+    # Distributional features.  ``expect`` works (the mixin's MC
+    # default), provided the user supplies a ``func`` that reduces the
+    # heterogeneous per-cluster list returned by ``draw`` to a
+    # consistent shape.  ``mean``/``var``/``cov`` do not have an
+    # unambiguous shape for a list-of-arrays return, so we raise
+    # NotImplementedError with a hint pointing back to ``expect``.
+    # ---------------------------------------------------------------
+    def mean(self, **kwargs: Any) -> Any:
+        del kwargs
+        raise NotImplementedError(
+            "TwoStageDGP.mean: draws are lists of per-cluster arrays "
+            "(heterogeneous shape).  Use .expect(func) with an "
+            "explicit aggregator that flattens to a consistent shape, "
+            "e.g.  ts.expect(lambda lst: np.vstack(lst).mean(axis=0))."
+        )
+
+    def var(self, **kwargs: Any) -> Any:
+        del kwargs
+        raise NotImplementedError(
+            "TwoStageDGP.var: draws are lists of per-cluster arrays.  "
+            "Use .expect(func) with an explicit aggregator."
+        )
+
+    def cov(self, **kwargs: Any) -> Any:
+        del kwargs
+        raise NotImplementedError(
+            "TwoStageDGP.cov: draws are lists of per-cluster arrays.  "
+            "Use .expect(func) with an explicit aggregator."
+        )
 
     def with_data(self, observation: Any) -> TwoStageDGP:
         """Return a new TwoStageDGP bound to a different observed realization.

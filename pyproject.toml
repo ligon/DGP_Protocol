@@ -30,6 +30,12 @@ pytest = "^8.2.0"
 ruff = "^0.5.4"
 black = "^24.4.2"
 mypy = "^1.10.0"
+# Used in tests for analytic-dispatch (scipy.stats) and DataFrame
+# aggregation paths.  Not runtime deps -- the package depends only on
+# numpy and pandas / scipy / DataMat are optional, discovered at
+# runtime via attribute / type checks.
+scipy = "^1.13"
+pandas = "^2.2"
 ipython = "^9.13.0"
 matplotlib = "^3.10.9"
 pickleshare = "^0.7.5"

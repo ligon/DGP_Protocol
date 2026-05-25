@@ -15,16 +15,20 @@ analog estimators are defined.
 from __future__ import annotations
 
 from .composition import TwoStageDGP, with_data
+from .distribution import DistributionalFeatures
 from .empirical import EmpiricalDGP
 from .parametric import ParametricDGP
 from .protocol import DataGeneratingProcess
 from .sampling import ClusteredSampling, IIDSampling, SamplingDesign
+from .warnings import NumericalWarning
 
 __all__ = [
     "ClusteredSampling",
     "DataGeneratingProcess",
+    "DistributionalFeatures",
     "EmpiricalDGP",
     "IIDSampling",
+    "NumericalWarning",
     "ParametricDGP",
     "SamplingDesign",
     "TwoStageDGP",

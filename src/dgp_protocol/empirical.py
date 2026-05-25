@@ -23,11 +23,12 @@ from typing import Any
 
 import numpy as np
 
+from .distribution import DistributionalFeatures
 from .sampling import IIDSampling, SamplingDesign
 
 
 @dataclass(frozen=True)
-class EmpiricalDGP:
+class EmpiricalDGP(DistributionalFeatures):
     """A Protocol-conformant wrapper around an observed dataset.
 
     Parameters
@@ -83,6 +84,41 @@ class EmpiricalDGP:
         return self.sampling.bootstrap_resample(
             self.observation, size=size, rng=self._rng
         )
+
+    # ---------------------------------------------------------------
+    # Distributional features: empirical distribution has exact
+    # mean/var/cov, so we override the mixin's MC defaults.  ``expect``
+    # falls through to MC (over the bootstrap distribution; semantics
+    # are intentionally left to the mixin since "expect over what" is
+    # ambiguous for empirical: either over the bootstrap distribution
+    # of draws, or over the empirical row distribution).
+    # ---------------------------------------------------------------
+    def mean(self, **kwargs: Any) -> Any:
+        """Exact empirical mean over rows of :attr:`observation`."""
+
+        del kwargs  # No MC; convergence kwargs not applicable.
+        obs = np.asarray(self.observation)
+        if obs.ndim <= 1:
+            return float(obs.mean()) if obs.size else float("nan")
+        return obs.mean(axis=0)
+
+    def var(self, **kwargs: Any) -> Any:
+        """Exact per-coordinate sample variance of :attr:`observation`."""
+
+        del kwargs
+        obs = np.asarray(self.observation, dtype=float)
+        if obs.ndim <= 1:
+            return float(obs.var(ddof=1)) if obs.size > 1 else float("nan")
+        return obs.var(axis=0, ddof=1)
+
+    def cov(self, **kwargs: Any) -> Any:
+        """Exact sample covariance of :attr:`observation`."""
+
+        del kwargs
+        obs = np.asarray(self.observation, dtype=float)
+        if obs.ndim <= 1:
+            return float(obs.var(ddof=1)) if obs.size > 1 else float("nan")
+        return np.cov(obs, rowvar=False, ddof=1)
 
     def with_data(self, observation: Any) -> EmpiricalDGP:
         """Return a new EmpiricalDGP bound to a different realization.
