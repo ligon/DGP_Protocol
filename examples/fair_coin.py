@@ -16,15 +16,23 @@ The realization shape is the tabular ``(N, p)`` convention used in the
 test suite: ``N`` rows of observations, ``p == 1`` column for this
 univariate case.
 
-The DGP carries no observed realization (``observation=None``); it is a
-pure Monte Carlo specification.  Bind one with ``dgp.with_data(obs)``
-if you want ``dgp.data`` to return something.
+The DGP is **bound to an observed realization** drawn once with a
+fixed seed (``OBS_SEED``) so ``dgp.data`` returns a real sample.  A
+downstream consumer can then compute the analog estimator
 
-The DGP owns its own Generator.  ``seed=0`` here makes the draws
-reproducible across runs; pass ``seed=None`` (or omit) for system-
-entropy seeding.  ``dgp.draw()`` never takes an ``rng`` argument; use
-``dgp.with_rng(rng)`` to swap in a specific Generator for parallel
-fan-out.
+    p_hat = float(dgp.data.mean())
+
+-- the sample analog of the population parameter
+``p == E_F[X] == 0.5``, in Manski's analog-estimation sense.  The
+observation's seed is intentionally distinct from the DGP's own
+:meth:`draw` seed so the two streams (observed realization vs fresh
+draws) are independent.
+
+The DGP owns its own Generator.  ``seed=0`` makes the :meth:`draw`
+stream reproducible across runs; pass ``seed=None`` (or omit) for
+system-entropy seeding.  ``dgp.draw()`` never takes an ``rng``
+argument; use ``dgp.with_rng(rng)`` to swap in a specific Generator
+for parallel fan-out.
 
 Run directly::
 
@@ -55,23 +63,37 @@ def fair_coin(rng: np.random.Generator, shape: tuple[int, ...]) -> np.ndarray:
 # Per-realization default shape: ``N`` rows by ``p == 1`` column.
 DEFAULT_SHAPE: tuple[int, int] = (100, 1)
 
+# Independent seed for the bound observation; deliberately distinct
+# from the DGP's own draw seed so the observed realization and the
+# fresh-draw stream do not share randomness.
+OBS_SEED: int = 2026
+
+OBSERVATION: np.ndarray = fair_coin(np.random.default_rng(OBS_SEED), DEFAULT_SHAPE)
+
 
 dgp = ParametricDGP(
     generator=fair_coin,
     default_shape=DEFAULT_SHAPE,
+    observation=OBSERVATION,
     seed=0,
 )
 
 
 def _demo() -> None:
-    """Sanity-check the DGP: protocol conformance + a small draw."""
+    """Sanity-check the DGP: protocol conformance, observed data, fresh draws."""
 
     # Structural typing: the DGP satisfies the runtime-checkable Protocol.
     assert isinstance(dgp, DataGeneratingProcess)
-    assert dgp.data is None
+    assert dgp.data is not None
+    assert dgp.data.shape == DEFAULT_SHAPE
 
+    # Analog estimation: p_hat is the sample analog of E_F[X] under F̂.
+    p_hat = float(dgp.data.mean())
+    print(f"observed:     shape={dgp.data.shape}  p_hat = {p_hat:.4f}")
+
+    # Fresh draws (independent of the bound observation).
     sample = dgp.draw()
-    print(f"default draw: shape={sample.shape}  dtype={sample.dtype}")
+    print(f"fresh draw:   shape={sample.shape}  dtype={sample.dtype}")
     print(f"  sample mean ({sample.shape[0]} draws) = {float(sample.mean()):.4f}")
 
     # Explicit ``size`` overrides ``default_shape``.
