@@ -25,5 +25,6 @@ Thumbs.db
 # sucoder / gitnexus housekeeping (machine-specific)
 .gitnexus
 .claude/
-AGENTS.md
 .coder-session/
+# (AGENTS.md is a hand-authored file in this repo, not gitnexus-auto-managed --
+# unlike the sibling ManifoldGMM repo.  Track it normally.)

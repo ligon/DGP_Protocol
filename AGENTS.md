@@ -1,0 +1,232 @@
+# Briefing for AI agents working on DGP_Protocol
+
+This file briefs a fresh AI agent (Claude Code, Codex, etc.) on the
+context the repo itself doesn't carry.  Read this *first* before
+making changes.
+
+Human contributors should read [`CONTRIBUTING.md`](./CONTRIBUTING.md)
+for the development workflow; this file focuses on conceptual context
+and scope discipline.
+
+## 1. What this package is — and is NOT
+
+**This package is a Protocol + a few combinators + thin convenience
+wrappers.**  Concretely:
+
+- `DataGeneratingProcess` — a runtime-checkable Protocol with two
+  members: `data` (frozen property) and `draw(size=None, *, rng)`
+  (method).  Two members.  That's it.
+- `EmpiricalDGP`, `ParametricDGP` — thin containers that wrap
+  user-supplied content (an observed matrix; a generator callable)
+  into Protocol-conformant objects.  No data-generating logic of
+  their own.
+- `TwoStageDGP`, `with_data` — composition primitives that take
+  DGPs and return DGPs.  No data-generating logic of their own.
+- `IIDSampling`, `ClusteredSampling` — internal helpers for
+  `EmpiricalDGP`'s bootstrap-resampling.  Not part of the public
+  Protocol surface.
+
+**This package is NOT:**
+
+- A library of working DGPs.  No `GaussianDGP`, `LinearModelDGP`,
+  `TimeSeriesARMA_DGP`, etc.  Specific DGPs live in *consumer*
+  packages.
+- A statistical-inference toolkit.  No `omega_hat`, no specification
+  tests, no confidence-interval machinery.
+- A simulation framework.  `ParametricDGP` accepts a user-supplied
+  generator; the package doesn't ship simulators.
+
+**The single most important rule**: the package must stay
+**estimator-agnostic**.  No moment-vector knowledge, no manifold
+knowledge, no likelihood knowledge.  If a proposed feature requires
+importing from any specific estimator package (e.g.\\ `manifoldgmm`),
+the feature belongs in that consumer package, not here.
+
+## 2. Conceptual lineage
+
+A `DataGeneratingProcess` is the *stand-in distribution* from
+Manski (1988), *Analog Estimation Methods in Econometrics*
+(Chapman and Hall).  The Protocol's two members map directly onto
+Manski's framework:
+
+- `data` ≈ the observed sample (the privileged realization of the
+  stand-in).
+- `draw(...)` ≈ the operation that produces more realizations from
+  the stand-in.
+
+Consumers compute *functionals* of the stand-in (the moment vector
+in GMM, the log-likelihood in MLE, the kernel density estimate in
+nonparametrics).  Different stand-ins yield different analog
+estimators — the empirical distribution gives nonparametric
+plug-in estimators, a parametric family gives MLE-style estimators,
+a bootstrap distribution gives bootstrap inference, etc.
+
+If you haven't internalised this framework, read at least the
+introductory chapter of Manski (1988) before making design choices.
+
+## 3. The design conversation lives in ManifoldGMM
+
+The substantive design conversation that motivated this package is
+captured in:
+
+```
+ligon/ManifoldGMM:docs/design/dgp.org   (PR #45 on that repo)
+```
+
+**Read that document first** before touching code here.  It covers:
+
+- The three-layer responsibility map (Model on `MomentRestriction`,
+  Data on `DataGeneratingProcess`, Bridge on `GMM` / `GMMResult`).
+- Why moment-function placement is on the model, not on the DGP.
+- The scope clarification (Protocol + combinators, NOT a library of
+  DGPs).
+- Composition: `TwoStageDGP`, callable-inner family-of-DGPs
+  convention, recursive composition for >2 stages.
+- The migration story for the eventual ManifoldGMM-side consumer
+  refactor.
+- The "settled this round" record of decisions taken: extract-now,
+  package naming (`DGP_Protocol` PyPI, `dgp_protocol` import),
+  PEP-8 imports, frozen-data semantics.
+- Open design questions explicitly NOT settled (see §7 below).
+
+That document is the design log; this repo is the implementation
+arm.  Choices that look like they're settled here often have
+substantial discussion behind them in the design note.
+
+## 4. The consumer relationship
+
+DGP_Protocol exists because ManifoldGMM needed it, but ManifoldGMM
+is one consumer of many that the design accommodates.  Know:
+
+- **ManifoldGMM does not yet depend on DGP_Protocol.**  The
+  consumer-side migration is documented in the design note but not
+  implemented.  ManifoldGMM's existing `MomentRestriction(data=array,
+  clusters=...)` surface is the *legacy* form; the *target* form is
+  `MomentRestriction(gi_jax=..., manifold=...)` + a separate
+  `EmpiricalDGP(observation=array, sampling=ClusteredSampling(...))`
+  passed alongside.
+- **Hypothetical future consumers** — an MLE package, an M-estimator
+  package, a density-estimator package, a kernel-regression package
+  — should be able to consume the same Protocol without DGP_Protocol
+  caring about their specifics.
+
+If you see an opportunity to add a feature that's clearly only
+useful to ManifoldGMM, **file it on ManifoldGMM, not here**.
+
+## 5. Conventions
+
+### Code
+
+- **Python 3.11+.**  Use modern type-annotation syntax.
+- **Frozen dataclasses** for value-type semantics on containers.
+  Rebinding observed data uses the `with_data(new_observation)`
+  pattern, which returns a fresh instance with structural attributes
+  preserved.
+- **Runtime-checkable Protocols** (`@runtime_checkable`) so
+  `isinstance(obj, DataGeneratingProcess)` works for any
+  duck-typed object exposing both members.
+- **Optional methods via `hasattr` dispatch.**  The `with_data`
+  free function in `composition.py` is the canonical example.  New
+  optional methods should follow this pattern: defined on concrete
+  types that want to opt in; consumers detect via `hasattr` and
+  fall back gracefully when absent.
+- **Numpy is the only runtime dependency.**  Resist adding pandas,
+  scipy, jax, etc. unless there's a hard requirement that can't be
+  met with numpy alone.
+
+### Tooling
+
+- `poetry install` to set up the dev environment.
+- `poetry run pytest` for tests.
+- `poetry run ruff check .`, `poetry run black --check .`,
+  `poetry run mypy src tests` are the gates.  All three must pass
+  before a commit lands.
+- No `Makefile` yet; commands are run via `poetry run` directly.
+
+### Git
+
+- Commits authored by `Coder <coder@example.com>` (the sucoder coder
+  account's git config — do NOT change).
+- AI agent identity goes in the `Co-Authored-By:` trailer.  Example:
+  `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>`.
+- Pushes go directly to GitHub over HTTPS (the `coder` account cannot
+  push to the ligon-side mirror).  `gh auth setup-git` is already
+  configured.
+
+## 6. What's deliberately not built (and why)
+
+A new agent might look around and think "I should add X."  For the
+items below, X has been considered and parked:
+
+- **`bootstrap_dgp(dgp, scheme=...)` constructor** — discussed in
+  the design note as planned but not implemented.  The cluster-block
+  bootstrap is already available via `ClusteredSampling` on
+  `EmpiricalDGP`.  Wild-bootstrap-of-moment-errors is
+  estimator-specific (belongs in ManifoldGMM, not here).  What
+  `bootstrap_dgp` would add is the **raw-data bootstrap with
+  selectable schemes** (`iid`, `cluster_block`, future
+  `block_bootstrap` for time series).  File-on-demand.
+- **`expect(func, *, method='auto')`, `mean()`, `cov()`** —
+  scipy.stats-style optional methods.  Useful for downstream
+  consumers that need population moments.  File-on-demand; should
+  follow the `hasattr`-dispatch pattern.
+- **Multi-stage composition convenience constructors** (e.g.
+  `Hierarchy([level1, level2_factory, level3_factory])`) — nested
+  `TwoStageDGP` already works for >2 stages; a flatter API is
+  convenience, not capability.  File-on-demand.
+- **A `BootstrapDGP` distinct from `TwoStageDGP`** — likely
+  redundant.  The design note explicitly maps cluster-wild bootstrap
+  onto `TwoStageDGP` composition.
+- **CI workflow** (`.github/workflows/ci.yml`) — not yet set up.
+  When you add one, match ManifoldGMM's pattern (a single
+  `quality-and-tests` job running ruff + black + mypy + pytest).
+
+## 7. Open design questions — do NOT resolve alone
+
+These need Ethan's input before any code lands:
+
+- **`with_data` on composite DGPs**: how to split a flat observed
+  realization back into outer / inner parts.  The design note's
+  Composition section lays out three workable options; none is
+  picked yet.
+- **`bootstrap_dgp`'s scheme taxonomy**: start narrow (iid,
+  cluster_block), grow on demand.  New schemes should be discussed
+  before being added — the Protocol's minimality is the constraint.
+- **Pickle semantics for parametric DGPs with closure-based
+  generators**: cloudpickle support could be added but introduces
+  an optional dependency.  Discuss before adding.
+- **Whether to add a top-level `draws(dgp, n, *, rng)` convenience**
+  that batches `draw(rng=rng)` calls.  The design note says "no —
+  plurality is the caller's concern."  Do not add it without
+  explicit user direction.
+
+## 8. Avoid scope creep
+
+The temptation will be to "round out" the package by adding specific
+DGP types, convenience functions, or pre-built estimator-specific
+helpers.  Resist.
+
+The package's value proposition is *the contract and the
+combinators that compose into bigger contracts*.  Specific DGPs and
+estimator-specific consumers belong elsewhere.  If you find yourself
+wanting to import from `manifoldgmm` (or any other estimator
+package), stop: that's a sign the work belongs there, not here.
+
+## 9. Sucoder workspace notes
+
+(These apply to whatever AI-agent harness is running.  Skip if
+already familiar.)
+
+- The repo lives in the sucoder coder mirror at
+  `/home/coder/mirrors/DGP_Protocol/` with a `ligon` fetch remote
+  (read-only-via-fetch, no-push by design).  Pushes go to GitHub
+  via HTTPS directly.
+- `gh` CLI is authed as `ligon` (Berkeley account, same as the
+  ManifoldGMM repo).
+- GitHub-side `gitnexus` may eventually index the repo for
+  cross-symbol analysis.  When it does, the auto-generated
+  `gitnexus:start`/`gitnexus:end` markers should NOT overwrite this
+  hand-authored AGENTS.md — gitnexus typically *appends* its
+  managed block to an existing file rather than replacing it.  If
+  you see unexpected gitnexus content in AGENTS.md, treat it as a
+  bug in the indexer's append logic, not as expected behaviour.
