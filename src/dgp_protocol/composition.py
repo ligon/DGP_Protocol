@@ -26,6 +26,16 @@ deterministically; the outer DGP's own RNG drives the cluster-
 characteristic draw.  Seeding both the outer DGP and the composite
 makes a top-level :meth:`TwoStageDGP.draw` fully reproducible.
 
+Distributional features
+-----------------------
+``draw()`` on :class:`TwoStageDGP` returns a *list* of per-cluster
+arrays -- a heterogeneous shape with no unambiguous "row" notion.
+Per-observation marginal operations (:meth:`expect`, :meth:`mean`,
+:meth:`var`, :meth:`cov`) therefore raise
+:class:`NotImplementedError` pointing the user at the dataset-level
+surface :attr:`sample_distribution`, which can accept any
+user-supplied statistic of the whole realization.
+
 A ``bootstrap_dgp(...)`` constructor for resampling-based derived
 DGPs is intentionally **not** implemented in this initial release.
 The cluster-(block-)bootstrap of raw data is available via
@@ -43,12 +53,12 @@ from typing import Any
 
 import numpy as np
 
-from .distribution import DistributionalFeatures
 from .protocol import DataGeneratingProcess
+from .sample_distribution import SampleDistribution
 
 
 @dataclass(frozen=True)
-class TwoStageDGP(DistributionalFeatures):
+class TwoStageDGP:
     """Hierarchical two-stage DGP.
 
     Clusters are drawn from an outer DGP; within each cluster, rows
@@ -131,37 +141,47 @@ class TwoStageDGP(DistributionalFeatures):
             per_cluster.append(inner_dgp.draw())
         return per_cluster
 
-    # ---------------------------------------------------------------
-    # Distributional features.  ``expect`` works (the mixin's MC
-    # default), provided the user supplies a ``func`` that reduces the
-    # heterogeneous per-cluster list returned by ``draw`` to a
-    # consistent shape.  ``mean``/``var``/``cov`` do not have an
-    # unambiguous shape for a list-of-arrays return, so we raise
-    # NotImplementedError with a hint pointing back to ``expect``.
-    # ---------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # P-side: refuse, point at sample_distribution.
+    # ------------------------------------------------------------------
+    def _refuse(self, op: str) -> None:
+        raise NotImplementedError(
+            f"TwoStageDGP.{op}: per-observation marginal operations have "
+            f"no unambiguous shape on a list-of-per-cluster-arrays draw.  "
+            f"Use dgp.sample_distribution.{op}(stat_func) (or "
+            f"sample_distribution.expect with a flattening aggregator, "
+            f"e.g.  lambda lst: np.vstack(lst).mean(axis=0)) for "
+            f"dataset-level operations."
+        )
+
+    def expect(self, func: Any, **kwargs: Any) -> Any:
+        del func, kwargs
+        self._refuse("expect")
+
     def mean(self, **kwargs: Any) -> Any:
         del kwargs
-        raise NotImplementedError(
-            "TwoStageDGP.mean: draws are lists of per-cluster arrays "
-            "(heterogeneous shape).  Use .expect(func) with an "
-            "explicit aggregator that flattens to a consistent shape, "
-            "e.g.  ts.expect(lambda lst: np.vstack(lst).mean(axis=0))."
-        )
+        self._refuse("mean")
 
     def var(self, **kwargs: Any) -> Any:
         del kwargs
-        raise NotImplementedError(
-            "TwoStageDGP.var: draws are lists of per-cluster arrays.  "
-            "Use .expect(func) with an explicit aggregator."
-        )
+        self._refuse("var")
 
     def cov(self, **kwargs: Any) -> Any:
         del kwargs
-        raise NotImplementedError(
-            "TwoStageDGP.cov: draws are lists of per-cluster arrays.  "
-            "Use .expect(func) with an explicit aggregator."
-        )
+        self._refuse("cov")
 
+    # ------------------------------------------------------------------
+    # D-side surface (works on any stat_func of the whole realization).
+    # ------------------------------------------------------------------
+    @property
+    def sample_distribution(self) -> SampleDistribution:
+        """Dataset-level distribution view (sampling distribution of statistics)."""
+
+        return SampleDistribution(self)
+
+    # ------------------------------------------------------------------
+    # Lineage operations.
+    # ------------------------------------------------------------------
     def with_data(self, observation: Any) -> TwoStageDGP:
         """Return a new TwoStageDGP bound to a different observed realization.
 

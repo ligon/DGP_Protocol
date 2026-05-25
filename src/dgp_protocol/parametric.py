@@ -12,18 +12,18 @@ ParametricDGP is just a Protocol-conformant adapter.
 Randomness is owned by the DGP.  Pass ``seed`` at construction for
 reproducibility; otherwise the Generator is seeded from system
 entropy.  Use :meth:`ParametricDGP.with_rng` to inject a specific
-Generator post-construction (e.g., a spawned child stream for a
-parallel worker).
+Generator post-construction.
 
-Analytic features
------------------
-When ``distribution`` is supplied, the DGP's
-:class:`~dgp_protocol.distribution.DistributionalFeatures` methods
-(``expect``, ``mean``, ``var``, ``cov``) preferentially delegate to
-the distribution's analytic methods (e.g., ``scipy.stats.norm().mean()``
-returns ``0.0`` directly rather than computing it via Monte Carlo).
-The dispatch is duck-typed via attribute lookup; any object exposing
-the relevant methods qualifies.
+Distributional features
+-----------------------
+When ``distribution`` is supplied, :meth:`expect`, :meth:`mean`,
+:meth:`var`, :meth:`cov` preferentially delegate to the
+distribution's analytic methods / attributes (scipy.stats-style;
+duck-typed).  When ``generator`` is supplied or the analytic
+attribute is absent, the methods raise
+:class:`~dgp_protocol.exceptions.AnalyticUnavailable` -- the free
+functions in :mod:`dgp_protocol.expect` catch this and fall back to
+adaptive Monte Carlo.
 
 Typical use cases:
 
@@ -45,11 +45,13 @@ from typing import Any
 
 import numpy as np
 
-from .distribution import DistributionalFeatures
+from ._mc import try_analytic
+from .exceptions import AnalyticUnavailable
+from .sample_distribution import SampleDistribution
 
 
 @dataclass(frozen=True)
-class ParametricDGP(DistributionalFeatures):
+class ParametricDGP:
     """A Protocol-conformant wrapper around a parametric data-generating recipe.
 
     Exactly one of ``generator`` or ``distribution`` must be supplied.
@@ -63,12 +65,11 @@ class ParametricDGP(DistributionalFeatures):
         representable by a scipy.stats-style distribution).
     distribution:
         A scipy.stats-style frozen distribution (or any duck-typed
-        equivalent) exposing ``rvs(size, random_state)`` plus, where
-        applicable, ``mean``, ``var``, ``cov``, ``expect``.  When
+        equivalent) exposing ``rvs(size, random_state)`` plus,
+        optionally, ``mean``, ``var``, ``cov``, ``expect``.  When
         supplied, :meth:`draw` uses ``distribution.rvs`` and the
-        :class:`~dgp_protocol.distribution.DistributionalFeatures`
-        methods preferentially delegate to the distribution's analytic
-        methods.
+        distributional-feature methods preferentially delegate to the
+        distribution's analytic methods.
     default_shape:
         Per-realization shape used when :meth:`draw` is called without
         an explicit ``size``.  For scipy.stats univariate
@@ -101,13 +102,10 @@ class ParametricDGP(DistributionalFeatures):
     ... )
     >>> dgp.draw().shape
     (100, 3)
-    >>> dgp.draw(size=(50, 3)).shape
-    (50, 3)
 
     scipy.stats distribution (analytic features available):
 
     >>> import scipy.stats                                 # doctest: +SKIP
-    >>> from dgp_protocol import ParametricDGP             # doctest: +SKIP
     >>> dgp = ParametricDGP(                               # doctest: +SKIP
     ...     distribution=scipy.stats.norm(loc=0, scale=2),
     ...     default_shape=(100,),
@@ -139,8 +137,6 @@ class ParametricDGP(DistributionalFeatures):
                 "custom draw mechanism but still want analytic features "
                 "from a scipy.stats-style backend, subclass ParametricDGP."
             )
-        # Frozen dataclass: bypass the __setattr__ guard to install
-        # the internal Generator built from ``seed``.
         object.__setattr__(self, "_rng", np.random.default_rng(self.seed))
 
     @property
@@ -160,10 +156,85 @@ class ParametricDGP(DistributionalFeatures):
         shape = size if size is not None else self.default_shape
         if self.distribution is not None:
             return self.distribution.rvs(size=shape, random_state=self._rng)
-        # Validated in __post_init__: generator is non-None here.
-        assert self.generator is not None
+        assert self.generator is not None  # validated in __post_init__
         return self.generator(self._rng, shape)
 
+    # ------------------------------------------------------------------
+    # P-side: scipy-style analytic dispatch; AnalyticUnavailable otherwise.
+    # ------------------------------------------------------------------
+    def expect(self, func: Any, **kwargs: Any) -> Any:
+        """Try ``distribution.expect(func, **dist_kwargs)``; raise if absent."""
+
+        if self.distribution is not None:
+            method = getattr(self.distribution, "expect", None)
+            if callable(method):
+                from ._mc import split_mc_kwargs
+
+                _, dist_kwargs = split_mc_kwargs(kwargs)
+                try:
+                    return method(func, **dist_kwargs)
+                except (NotImplementedError, TypeError):
+                    pass
+        raise AnalyticUnavailable(
+            "ParametricDGP.expect: no analytic backend "
+            "(distribution=None or distribution lacks .expect).  Use "
+            "the free function dgp_protocol.expect.expect(dgp, func) "
+            "for the Monte Carlo fallback, or "
+            "dgp.sample_distribution.expect(stat_func) for dataset-"
+            "level operations."
+        )
+
+    def mean(self, **kwargs: Any) -> Any:
+        """Analytic ``distribution.mean`` (method or attribute); raise if absent."""
+
+        del kwargs  # No MC; convergence kwargs are not applicable.
+        return self._scipy_attr("mean")
+
+    def var(self, **kwargs: Any) -> Any:
+        """Analytic ``distribution.var`` (method or attribute); raise if absent."""
+
+        del kwargs
+        return self._scipy_attr("var")
+
+    def cov(self, **kwargs: Any) -> Any:
+        """Analytic ``distribution.cov`` (method or attribute); raise if absent."""
+
+        del kwargs
+        return self._scipy_attr("cov")
+
+    def _scipy_attr(self, name: str) -> Any:
+        """Resolve ``self.distribution.<name>`` (callable or attribute)."""
+
+        if self.distribution is None:
+            raise AnalyticUnavailable(
+                f"ParametricDGP.{name}: no analytic backend "
+                f"(generator-based DGP).  Use the free function "
+                f"dgp_protocol.expect.{name}(dgp) for the Monte Carlo "
+                f"fallback."
+            )
+        value, found = try_analytic(self.distribution, name)
+        if not found:
+            raise AnalyticUnavailable(
+                f"ParametricDGP.{name}: backend "
+                f"{type(self.distribution).__name__} exposes no "
+                f".{name} attribute.  Use the free function "
+                f"dgp_protocol.expect.{name}(dgp) for the Monte Carlo "
+                f"fallback."
+            )
+        return value
+
+    # ------------------------------------------------------------------
+    # D-side surface.
+    # ------------------------------------------------------------------
+    @property
+    def sample_distribution(self) -> SampleDistribution:
+        """Dataset-level distribution view (sampling distribution of statistics)."""
+
+        return SampleDistribution(self)
+
+    # ------------------------------------------------------------------
+    # Lineage operations.
+    # ------------------------------------------------------------------
     def with_data(self, observation: Any) -> ParametricDGP:
         """Return a new ParametricDGP bound to a different realization.
 

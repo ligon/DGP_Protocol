@@ -14,6 +14,22 @@ reproducibility; otherwise the Generator is seeded from system
 entropy.  Use :meth:`EmpiricalDGP.with_rng` to inject a specific
 Generator post-construction (e.g., a spawned child stream for a
 parallel bootstrap worker).
+
+Distributional features
+-----------------------
+Under :class:`~dgp_protocol.sampling.IIDSampling`, the per-observation
+marginal distribution is the empirical distribution F̂ of the
+observation matrix; :meth:`mean`, :meth:`var`, :meth:`cov`, and
+:meth:`expect` are exact and computed in closed form.  Under
+:class:`~dgp_protocol.sampling.ClusteredSampling` (and any other
+non-iid design) rows are not iid; per-observation marginal moments
+lose their analog-estimation interpretation and the methods raise
+:class:`NotImplementedError` pointing the user at the dataset-level
+surface :attr:`sample_distribution`.
+
+Dataset-level operations (sampling distribution of statistics, the
+cluster-robust moment-vector covariance for analog estimation) live
+on :attr:`sample_distribution` and work for any sampling design.
 """
 
 from __future__ import annotations
@@ -23,12 +39,12 @@ from typing import Any
 
 import numpy as np
 
-from .distribution import DistributionalFeatures
+from .sample_distribution import SampleDistribution
 from .sampling import IIDSampling, SamplingDesign
 
 
 @dataclass(frozen=True)
-class EmpiricalDGP(DistributionalFeatures):
+class EmpiricalDGP:
     """A Protocol-conformant wrapper around an observed dataset.
 
     Parameters
@@ -55,13 +71,8 @@ class EmpiricalDGP(DistributionalFeatures):
     >>> dgp = EmpiricalDGP(observation=obs, seed=1)
     >>> dgp.draw().shape
     (10, 3)
-    >>> # With clusters:
-    >>> clusters = np.array([0, 0, 0, 1, 1, 2, 2, 2, 2, 3])
-    >>> cdgp = EmpiricalDGP(
-    ...     observation=obs, sampling=ClusteredSampling(clusters), seed=1
-    ... )
-    >>> cdgp.draw().shape[1]                    # second axis preserved
-    3
+    >>> dgp.mean().shape   # exact analytic mean of each column
+    (3,)
     """
 
     observation: Any
@@ -85,26 +96,54 @@ class EmpiricalDGP(DistributionalFeatures):
             self.observation, size=size, rng=self._rng
         )
 
-    # ---------------------------------------------------------------
-    # Distributional features: empirical distribution has exact
-    # mean/var/cov, so we override the mixin's MC defaults.  ``expect``
-    # falls through to MC (over the bootstrap distribution; semantics
-    # are intentionally left to the mixin since "expect over what" is
-    # ambiguous for empirical: either over the bootstrap distribution
-    # of draws, or over the empirical row distribution).
-    # ---------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # P-side distributional features: analytic for IID, refuse for non-iid.
+    # ------------------------------------------------------------------
+    def _refuse_non_iid(self, op: str) -> None:
+        if not isinstance(self.sampling, IIDSampling):
+            raise NotImplementedError(
+                f"EmpiricalDGP.{op}: per-observation marginal under "
+                f"{type(self.sampling).__name__} loses the analog-"
+                f"estimation interpretation (rows are not iid).  Use "
+                f"dgp.sample_distribution for dataset-level operations "
+                f"(including cluster-robust moment covariance), or "
+                f"re-construct with sampling=IIDSampling() to get the "
+                f"empirical marginal moment."
+            )
+
+    def expect(self, func: Any, **kwargs: Any) -> Any:
+        """``E_F̂[func(X)]`` -- exact over rows of :attr:`observation`."""
+
+        self._refuse_non_iid("expect")
+        del kwargs  # No MC; convergence kwargs are not applicable.
+        arr = np.asarray(self.observation)
+        if arr.ndim == 0:
+            return func(arr.item())
+        vals = [func(row) for row in arr]
+        # Aggregate via numpy for arrays / scalars; fall back to
+        # numpy mean for the common case.
+        first = vals[0]
+        if isinstance(first, int | float | np.number) or isinstance(first, np.ndarray):
+            return np.mean(np.stack([np.asarray(v) for v in vals]), axis=0)
+        # Defer non-numpy aggregation to the shared aggregator.
+        from ._mc import aggregate
+
+        return aggregate(vals)[0]
+
     def mean(self, **kwargs: Any) -> Any:
         """Exact empirical mean over rows of :attr:`observation`."""
 
-        del kwargs  # No MC; convergence kwargs not applicable.
+        self._refuse_non_iid("mean")
+        del kwargs
         obs = np.asarray(self.observation)
         if obs.ndim <= 1:
             return float(obs.mean()) if obs.size else float("nan")
         return obs.mean(axis=0)
 
     def var(self, **kwargs: Any) -> Any:
-        """Exact per-coordinate sample variance of :attr:`observation`."""
+        """Exact per-coordinate sample variance (ddof=1) of :attr:`observation`."""
 
+        self._refuse_non_iid("var")
         del kwargs
         obs = np.asarray(self.observation, dtype=float)
         if obs.ndim <= 1:
@@ -112,14 +151,27 @@ class EmpiricalDGP(DistributionalFeatures):
         return obs.var(axis=0, ddof=1)
 
     def cov(self, **kwargs: Any) -> Any:
-        """Exact sample covariance of :attr:`observation`."""
+        """Exact sample covariance (ddof=1) of :attr:`observation`."""
 
+        self._refuse_non_iid("cov")
         del kwargs
         obs = np.asarray(self.observation, dtype=float)
         if obs.ndim <= 1:
             return float(obs.var(ddof=1)) if obs.size > 1 else float("nan")
         return np.cov(obs, rowvar=False, ddof=1)
 
+    # ------------------------------------------------------------------
+    # D-side surface.
+    # ------------------------------------------------------------------
+    @property
+    def sample_distribution(self) -> SampleDistribution:
+        """Dataset-level distribution view (sampling distribution of statistics)."""
+
+        return SampleDistribution(self)
+
+    # ------------------------------------------------------------------
+    # Lineage operations.
+    # ------------------------------------------------------------------
     def with_data(self, observation: Any) -> EmpiricalDGP:
         """Return a new EmpiricalDGP bound to a different realization.
 
