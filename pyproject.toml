@@ -30,6 +30,9 @@ pytest = "^8.2.0"
 ruff = "^0.5.4"
 black = "^24.4.2"
 mypy = "^1.10.0"
+ipython = "^9.13.0"
+matplotlib = "^3.10.9"
+pickleshare = "^0.7.5"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
