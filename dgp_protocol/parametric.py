@@ -122,6 +122,7 @@ class ParametricDGP:
     default_shape: tuple[int, ...] = ()
     distribution: Any = field(default=None)
     observation: Any = field(default=None)
+    sampling: Any = field(default=None)
     seed: int | None = None
     _rng: np.random.Generator = field(init=False, repr=False, compare=False)
 
@@ -269,9 +270,50 @@ class ParametricDGP:
             default_shape=self.default_shape,
             distribution=self.distribution,
             observation=observation,
+            sampling=self.sampling,
         )
         object.__setattr__(new, "_rng", rng)
         return new
+
+    # ------------------------------------------------------------------
+    # D-side analytic hook: delegates to ``sampling`` when supplied.
+    # ------------------------------------------------------------------
+    def _sd_moment_covariance(
+        self,
+        theta: Any,
+        gi: Any,
+        **kwargs: Any,
+    ) -> Any:
+        """Analytic moment-vector covariance under the bound observation.
+
+        Available when both ``sampling`` and ``observation`` are
+        supplied at construction.  Delegates to
+        ``sampling.moment_covariance_estimator(observation, theta, gi,
+        centered=...)`` -- the closed-form formula for the declared
+        sampling design applied to the bound observation.
+
+        Raises :class:`AnalyticUnavailable` when either is missing,
+        which the free
+        :meth:`~dgp_protocol.SampleDistribution.moment_covariance`
+        catches and falls back to MC over ``draw()`` realizations.
+        """
+
+        if self.sampling is None:
+            raise AnalyticUnavailable(
+                "ParametricDGP._sd_moment_covariance: no sampling design "
+                "declared.  Construct with sampling=... to enable the "
+                "analytic moment-covariance, or rely on the MC fallback."
+            )
+        if self.observation is None:
+            raise AnalyticUnavailable(
+                "ParametricDGP._sd_moment_covariance: no observation bound. "
+                "Bind one via observation= or .with_data(obs) to compute "
+                "the analytic moment-covariance on a specific realization."
+            )
+        centered = kwargs.get("centered", True)
+        return self.sampling.moment_covariance_estimator(
+            self.observation, theta, gi, centered=centered
+        )
 
     # ------------------------------------------------------------------
     # Pickle support.
@@ -288,8 +330,8 @@ class ParametricDGP:
         ``distribution`` to bytes via :mod:`cloudpickle`, which stdlib
         pickle then stores natively; the module-level reconstructor
         ``_reconstruct_parametric_dgp`` deserialises them on load.
-        Other fields (``observation``, ``seed``, ``_rng``) are passed
-        through to stdlib pickle directly.
+        Other fields (``observation``, ``sampling``, ``seed``, ``_rng``)
+        are passed through to stdlib pickle directly.
         """
 
         return (
@@ -299,6 +341,7 @@ class ParametricDGP:
                 cloudpickle.dumps(self.distribution),
                 self.default_shape,
                 self.observation,
+                self.sampling,
                 self.seed,
                 self._rng,
             ),
@@ -310,6 +353,7 @@ def _reconstruct_parametric_dgp(
     dist_bytes: bytes,
     default_shape: tuple[int, ...],
     observation: Any,
+    sampling: Any,
     seed: int | None,
     rng: np.random.Generator,
 ) -> ParametricDGP:
@@ -320,6 +364,7 @@ def _reconstruct_parametric_dgp(
         distribution=cloudpickle.loads(dist_bytes),
         default_shape=default_shape,
         observation=observation,
+        sampling=sampling,
         seed=seed,
     )
     object.__setattr__(new, "_rng", rng)

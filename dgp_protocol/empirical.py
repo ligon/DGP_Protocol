@@ -169,6 +169,31 @@ class EmpiricalDGP:
 
         return SampleDistribution(self)
 
+    def _sd_moment_covariance(
+        self,
+        theta: Any,
+        gi: Any,
+        **kwargs: Any,
+    ) -> Any:
+        """Analytic moment-vector covariance under the bound observation.
+
+        Delegates to ``self.sampling.moment_covariance_estimator``, the
+        closed-form formula corresponding to the sampling design (iid
+        outer product for :class:`~dgp_protocol.IIDSampling`, cluster-
+        robust sandwich for :class:`~dgp_protocol.ClusteredSampling`).
+        No Monte Carlo.
+
+        Honored kwargs: ``centered`` (default ``True``).  MC-control
+        kwargs (``atol``, ``rtol``, ``max_its``, ``batch_size``) are
+        silently ignored -- this is the analytic path, no convergence
+        loop applies.
+        """
+
+        centered = kwargs.get("centered", True)
+        return self.sampling.moment_covariance_estimator(
+            self.observation, theta, gi, centered=centered
+        )
+
     # ------------------------------------------------------------------
     # Lineage operations.
     # ------------------------------------------------------------------

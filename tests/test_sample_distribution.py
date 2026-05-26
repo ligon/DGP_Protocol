@@ -15,6 +15,7 @@ from dgp_protocol import (
     AnalyticUnavailable,
     ClusteredSampling,
     EmpiricalDGP,
+    IIDSampling,
     NumericalWarning,
     ParametricDGP,
     SampleDistribution,
@@ -319,6 +320,166 @@ def test_sd_moment_covariance_cluster_robust_exceeds_iid() -> None:
         f"expected cluster-robust trace > 1.5 * iid trace; "
         f"got cluster={trace_cluster:.3f}, iid={trace_iid:.3f}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Analytic _sd_moment_covariance on EmpiricalDGP / ParametricDGP
+# (Phase A wiring: dispatches to SamplingDesign.moment_covariance_estimator)
+# ---------------------------------------------------------------------------
+def test_empirical_iid_sd_moment_covariance_is_analytic() -> None:
+    """EmpiricalDGP._sd_moment_covariance uses the closed-form formula,
+    no MC, no NumericalWarning even at impossibly-tight tolerance."""
+
+    obs, _ = _make_clustered_observation()
+    iid_dgp = EmpiricalDGP(observation=obs, seed=0)
+    theta = obs.mean(axis=0)
+
+    def gi(theta, X):
+        return X - theta
+
+    import warnings as _w
+
+    with _w.catch_warnings():
+        _w.simplefilter("error", NumericalWarning)
+        # If MC fired, we'd warn (or hit max_its) at this tolerance.
+        omega = iid_dgp.sample_distribution.moment_covariance(
+            theta=theta, gi=gi, atol=1e-12, rtol=0.0
+        )
+
+    # Same as calling the SamplingDesign's estimator directly.
+    direct = iid_dgp.sampling.moment_covariance_estimator(
+        obs, theta=theta, gi=gi, centered=True
+    )
+    np.testing.assert_allclose(omega, direct, atol=1e-12)
+
+
+def test_empirical_clustered_sd_moment_covariance_is_analytic() -> None:
+    """Same for ClusteredSampling: closed-form, no MC."""
+
+    obs, cluster_ids = _make_clustered_observation()
+    cdgp = EmpiricalDGP(
+        observation=obs,
+        sampling=ClusteredSampling(cluster_ids=cluster_ids),
+        seed=0,
+    )
+    theta = obs.mean(axis=0)
+
+    def gi(theta, X):
+        return X - theta
+
+    import warnings as _w
+
+    with _w.catch_warnings():
+        _w.simplefilter("error", NumericalWarning)
+        omega = cdgp.sample_distribution.moment_covariance(
+            theta=theta, gi=gi, atol=1e-12, rtol=0.0
+        )
+
+    direct = cdgp.sampling.moment_covariance_estimator(
+        obs, theta=theta, gi=gi, centered=True
+    )
+    np.testing.assert_allclose(omega, direct, atol=1e-12)
+
+
+def test_parametric_with_sampling_and_observation_takes_analytic() -> None:
+    """ParametricDGP(sampling=..., observation=...) uses the analytic path."""
+
+    obs, cluster_ids = _make_clustered_observation()
+
+    def gen(rng, shape):
+        return rng.standard_normal(shape)
+
+    pdgp = ParametricDGP(
+        generator=gen,
+        default_shape=obs.shape,
+        observation=obs,
+        sampling=ClusteredSampling(cluster_ids=cluster_ids),
+        seed=0,
+    )
+    theta = obs.mean(axis=0)
+
+    def gi(theta, X):
+        return X - theta
+
+    import warnings as _w
+
+    with _w.catch_warnings():
+        _w.simplefilter("error", NumericalWarning)
+        omega = pdgp.sample_distribution.moment_covariance(
+            theta=theta, gi=gi, atol=1e-12, rtol=0.0
+        )
+
+    # Same answer as if we'd wrapped the observation in EmpiricalDGP.
+    edgp = EmpiricalDGP(
+        observation=obs, sampling=ClusteredSampling(cluster_ids=cluster_ids)
+    )
+    direct = edgp.sampling.moment_covariance_estimator(
+        obs, theta=theta, gi=gi, centered=True
+    )
+    np.testing.assert_allclose(omega, direct, atol=1e-12)
+
+
+def test_parametric_without_sampling_falls_back_to_mc() -> None:
+    """ParametricDGP(sampling=None) raises AnalyticUnavailable -> MC fallback."""
+
+    dgp = ParametricDGP(distribution=st.norm(), default_shape=(50,), seed=0)
+
+    def gi(theta, realization):
+        return np.asarray(realization).reshape(-1, 1)
+
+    # No sampling => AnalyticUnavailable from the hook => SD MCs.
+    val = dgp.sample_distribution.moment_covariance(
+        theta=None, gi=gi, atol=0.1, rtol=0.0, max_its=2_000, batch_size=100
+    )
+    val_scalar = float(np.asarray(val).flat[0])
+    # Var(g_bar_N) for g_i = X_i iid N(0,1) is 1.
+    assert abs(val_scalar - 1.0) < 0.3
+
+
+def test_parametric_with_sampling_but_no_observation_falls_back_to_mc() -> None:
+    """ParametricDGP(sampling=..., observation=None) also MCs."""
+
+    dgp = ParametricDGP(
+        distribution=st.norm(),
+        default_shape=(50,),
+        sampling=IIDSampling(),
+        observation=None,
+        seed=0,
+    )
+
+    def gi(theta, realization):
+        return np.asarray(realization).reshape(-1, 1)
+
+    # observation=None -> AnalyticUnavailable -> MC.
+    val = dgp.sample_distribution.moment_covariance(
+        theta=None, gi=gi, atol=0.1, rtol=0.0, max_its=2_000, batch_size=100
+    )
+    val_scalar = float(np.asarray(val).flat[0])
+    assert abs(val_scalar - 1.0) < 0.3
+
+
+def test_parametric_sampling_field_round_trips_pickle() -> None:
+    """The new sampling field survives pickle (incl. cloudpickle path)."""
+
+    import pickle
+
+    obs = np.arange(40).reshape(10, 4).astype(float)
+    ids = np.array([0] * 5 + [1] * 5)
+    pdgp = ParametricDGP(
+        generator=lambda rng, shape: rng.standard_normal(shape),
+        default_shape=obs.shape,
+        observation=obs,
+        sampling=ClusteredSampling(cluster_ids=ids),
+        seed=0,
+    )
+    pdgp2 = pickle.loads(pickle.dumps(pdgp))
+    assert isinstance(pdgp2.sampling, ClusteredSampling)
+    np.testing.assert_array_equal(pdgp2.sampling.cluster_ids, ids)
+    # The analytic path works post-pickle.
+    omega = pdgp2.sample_distribution.moment_covariance(
+        theta=obs.mean(axis=0), gi=lambda t, X: X - t
+    )
+    assert omega.shape == (4, 4)
 
 
 # ---------------------------------------------------------------------------

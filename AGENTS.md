@@ -127,9 +127,13 @@ is one consumer of many that the design accommodates.  Know:
     no longer fires for DGP_Protocol objects, but it remains
     relevant for user code with its own closures.
   - `MomentRestriction.omega_hat(theta)` still lives in the Model
-    layer (not yet migrated to `dgp.sample_distribution.moment_covariance`);
-    blocked on us shipping the analytic `_sd_moment_covariance`
-    override (§6 deferred list).
+    layer; migration to `dgp.sample_distribution.moment_covariance`
+    is unblocked (we shipped the analytic
+    `SamplingDesign.moment_covariance_estimator` + per-container
+    `_sd_moment_covariance` wiring; the formula is byte-parity with
+    ManifoldGMM's existing `omega_hat`).  Pending an actual
+    ManifoldGMM-side PR replacing the direct formula with a
+    delegation to the DGP-side hook.
 - **Examples are an informal downstream contract.**
   ManifoldGMM's v2 tests directly import from our `examples/`:
   `tests/v2/bernoulli_v2.py` does
@@ -232,16 +236,6 @@ items below, X has been considered and parked:
   `bootstrap_dgp` would add is the **raw-data bootstrap with
   selectable schemes** (`iid`, `cluster_block`, future
   `block_bootstrap` for time series).  File-on-demand.
-- **Analytic `_sd_moment_covariance` on `EmpiricalDGP`** — the
-  hook is in place on the `SampleDistribution` view (D-side),
-  defaulting to MC.  An iid outer-product implementation for
-  `IIDSampling` and a cluster-robust outer-product for
-  `ClusteredSampling` would make the analog-estimation
-  `omega_hat` consumer call (in ManifoldGMM) skip MC.
-  Probably belongs on `SamplingDesign` as
-  `moment_covariance_estimator(observation, theta, gi)` (per the
-  design note's reference code) with `EmpiricalDGP` delegating;
-  not built yet.
 - **Free `with_rng(dgp, rng)` / `sample_distribution(dgp)`** —
   parallel to the existing free `with_data(dgp, obs)`.  Useful for
   framework code that rebinds randomness on arbitrary DGP-like
