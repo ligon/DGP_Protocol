@@ -36,6 +36,26 @@ system-entropy seeding.  ``dgp.draw()`` never takes an ``rng``
 argument; use ``dgp.with_rng(rng)`` to swap in a specific Generator
 for parallel fan-out.
 
+Alternative construction via scipy.stats
+----------------------------------------
+The same distribution is also constructed as ``dgp_scipy`` using
+the ``distribution=`` constructor argument with
+``scipy.stats.bernoulli(p=0.5)``.  When ``ParametricDGP`` is given
+a scipy.stats-style frozen distribution (or any duck-typed
+equivalent), the :meth:`mean` / :meth:`var` / :meth:`cov` /
+:meth:`expect` methods preferentially delegate to the
+distribution's analytic implementations -- no Monte Carlo, no
+adaptive-convergence loop.  ``dgp_scipy.mean()`` therefore returns
+``0.5`` exactly and immediately, whereas ``dgp.mean()`` (custom
+generator) raises :class:`~dgp_protocol.AnalyticUnavailable`
+because no analytic backend is supplied.
+
+The free function ``dgp_protocol.mean(dgp)`` papers over the
+difference: it catches ``AnalyticUnavailable`` and falls back to
+adaptive Monte Carlo for the custom-generator case while taking
+the analytic shortcut for the scipy case.  Same call site, two
+underlying paths.
+
 Run directly::
 
     python examples/fair_coin.py
@@ -53,8 +73,10 @@ symbols) land in your namespace::
 from __future__ import annotations
 
 import numpy as np
+import scipy.stats as st
 
-from dgp_protocol import DataGeneratingProcess, ParametricDGP
+from dgp_protocol import AnalyticUnavailable, DataGeneratingProcess, ParametricDGP
+from dgp_protocol import mean as marginal_mean
 
 
 def fair_coin(rng: np.random.Generator, shape: tuple[int, ...]) -> np.ndarray:
@@ -76,6 +98,17 @@ OBSERVATION: np.ndarray = fair_coin(np.random.default_rng(OBS_SEED), DEFAULT_SHA
 
 dgp = ParametricDGP(
     generator=fair_coin,
+    default_shape=DEFAULT_SHAPE,
+    observation=OBSERVATION,
+    seed=0,
+)
+
+# Same distribution constructed via scipy.stats.bernoulli.  Different
+# draw mechanism (scipy.stats.bernoulli.rvs vs numpy.binomial), same
+# marginal distribution -- and analytic .mean() / .var() / .cov() /
+# .expect() come along for free via duck-typed dispatch.
+dgp_scipy = ParametricDGP(
+    distribution=st.bernoulli(p=0.5),
     default_shape=DEFAULT_SHAPE,
     observation=OBSERVATION,
     seed=0,
@@ -103,6 +136,47 @@ def _demo() -> None:
     big = dgp.draw(size=(10_000, 1))
     print(f"sized draw:   shape={big.shape}")
     print(f"  sample mean ({big.shape[0]:,} draws) = {float(big.mean()):.4f}")
+
+    # ----- scipy-backed alternative: analytic features for free -----
+    print()
+    print("scipy-backed alternative (dgp_scipy):")
+
+    # ``.item()`` coerces both 0-d scalars (scipy's analytic return)
+    # and (1,)-shape arrays (MC fallback aggregating over rows of a
+    # (N, 1) draw) to a Python float.  See the module docstring for
+    # the analytic-vs-MC dispatch story.
+    def _scalar(x):
+        return np.asarray(x).flatten()[0]
+
+    # Analytic dispatch: no MC, no convergence loop.
+    print(
+        f"  dgp_scipy.mean() (analytic):  {_scalar(dgp_scipy.mean()):.4f}"
+        f"     # exactly p = 0.5"
+    )
+    print(
+        f"  dgp_scipy.var()  (analytic):  {_scalar(dgp_scipy.var()):.4f}"
+        f"     # exactly p(1-p) = 0.25"
+    )
+
+    # Contrast: the custom-generator dgp refuses analytic methods.
+    try:
+        dgp.mean()
+    except AnalyticUnavailable as exc:
+        first_line = str(exc).splitlines()[0]
+        print(f"  dgp.mean()       raised:  {first_line}")
+
+    # The free function takes the analytic shortcut for the scipy
+    # backend and falls back to adaptive MC for the custom-generator
+    # case -- same call site, two paths under the hood.
+    print(
+        f"  marginal.mean(dgp_scipy) = "
+        f"{_scalar(marginal_mean(dgp_scipy)):.4f}  (analytic shortcut)"
+    )
+    print(
+        f"  marginal.mean(dgp)       = "
+        f"{_scalar(marginal_mean(dgp, atol=0.01, rtol=0.0)):.4f}"
+        f"  (MC fallback, atol=0.01)"
+    )
 
 
 if __name__ == "__main__":
