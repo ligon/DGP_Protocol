@@ -51,6 +51,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+import cloudpickle
 import numpy as np
 
 from .protocol import DataGeneratingProcess
@@ -213,6 +214,54 @@ class TwoStageDGP:
         )
         object.__setattr__(new, "_rng", rng)
         return new
+
+    # ------------------------------------------------------------------
+    # Pickle support.
+    # ------------------------------------------------------------------
+    def __reduce__(
+        self,
+    ) -> tuple[Callable[..., TwoStageDGP], tuple[Any, ...]]:
+        """Pickle via cloudpickle for the ``inner`` callable.
+
+        Stdlib pickle resolves callables by ``(module, qualname)``
+        lookup, which fails for the lambda / closure-based ``inner``
+        builders that are the natural idiom for TwoStageDGP.  This
+        ``__reduce__`` pre-serialises ``inner`` to bytes via
+        :mod:`cloudpickle`; ``outer`` is passed through to stdlib
+        pickle (recursively using its own ``__reduce__`` if it has
+        one) so a ParametricDGP outer with lambda generator round-
+        trips correctly.
+        """
+
+        return (
+            _reconstruct_two_stage_dgp,
+            (
+                self.outer,
+                cloudpickle.dumps(self.inner),
+                self.observation,
+                self.seed,
+                self._rng,
+            ),
+        )
+
+
+def _reconstruct_two_stage_dgp(
+    outer: DataGeneratingProcess,
+    inner_bytes: bytes,
+    observation: Any,
+    seed: int | None,
+    rng: np.random.Generator,
+) -> TwoStageDGP:
+    """Module-level reconstructor for :meth:`TwoStageDGP.__reduce__`."""
+
+    new = TwoStageDGP(
+        outer=outer,
+        inner=cloudpickle.loads(inner_bytes),
+        observation=observation,
+        seed=seed,
+    )
+    object.__setattr__(new, "_rng", rng)
+    return new
 
 
 def with_data(dgp: DataGeneratingProcess, observation: Any) -> Any:

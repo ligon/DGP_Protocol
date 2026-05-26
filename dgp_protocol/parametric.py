@@ -43,6 +43,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+import cloudpickle
 import numpy as np
 
 from ._mc import try_analytic
@@ -271,3 +272,55 @@ class ParametricDGP:
         )
         object.__setattr__(new, "_rng", rng)
         return new
+
+    # ------------------------------------------------------------------
+    # Pickle support.
+    # ------------------------------------------------------------------
+    def __reduce__(
+        self,
+    ) -> tuple[Callable[..., ParametricDGP], tuple[Any, ...]]:
+        """Pickle via cloudpickle for the callable fields.
+
+        Stdlib pickle resolves callables by ``(module, qualname)`` lookup,
+        which fails for lambdas, nested functions, and closures over
+        local variables -- common idioms for the ``generator`` argument.
+        This ``__reduce__`` pre-serialises ``generator`` and
+        ``distribution`` to bytes via :mod:`cloudpickle`, which stdlib
+        pickle then stores natively; the module-level reconstructor
+        ``_reconstruct_parametric_dgp`` deserialises them on load.
+        Other fields (``observation``, ``seed``, ``_rng``) are passed
+        through to stdlib pickle directly.
+        """
+
+        return (
+            _reconstruct_parametric_dgp,
+            (
+                cloudpickle.dumps(self.generator),
+                cloudpickle.dumps(self.distribution),
+                self.default_shape,
+                self.observation,
+                self.seed,
+                self._rng,
+            ),
+        )
+
+
+def _reconstruct_parametric_dgp(
+    gen_bytes: bytes,
+    dist_bytes: bytes,
+    default_shape: tuple[int, ...],
+    observation: Any,
+    seed: int | None,
+    rng: np.random.Generator,
+) -> ParametricDGP:
+    """Module-level reconstructor for :meth:`ParametricDGP.__reduce__`."""
+
+    new = ParametricDGP(
+        generator=cloudpickle.loads(gen_bytes),
+        distribution=cloudpickle.loads(dist_bytes),
+        default_shape=default_shape,
+        observation=observation,
+        seed=seed,
+    )
+    object.__setattr__(new, "_rng", rng)
+    return new

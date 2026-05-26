@@ -15,6 +15,7 @@ classifiers = [
 ]
 dependencies = [
   "numpy>=1.26",
+  "cloudpickle>=3.0",
 ]
 
 [tool.poetry]
@@ -24,6 +25,7 @@ packages = [{ include = "dgp_protocol" }]
 [tool.poetry.dependencies]
 python = ">=3.11,<4.0"
 numpy = ">=1.26"
+cloudpickle = "^3.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2.0"

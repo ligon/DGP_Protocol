@@ -152,9 +152,15 @@ useful to ManifoldGMM, **file it on ManifoldGMM, not here**.
   fall back to MC.  Reserve bare `NotImplementedError` for
   principled refusals where MC would be wrong or meaningless
   (e.g., `TwoStageDGP.mean`); free functions propagate it.
-- **Numpy is the only runtime dependency.**  Resist adding pandas,
-  scipy, jax, etc. unless there's a hard requirement that can't be
-  met with numpy alone.
+- **Runtime dependencies: numpy + cloudpickle, that's it.**
+  ``cloudpickle`` is needed because ``ParametricDGP`` and
+  ``TwoStageDGP`` override ``__reduce__`` to make stdlib
+  ``pickle.dumps`` work transparently for lambda / closure-based
+  ``generator`` / ``inner`` callables -- without it, the natural
+  Python idioms for those fields wouldn't round-trip through
+  ``multiprocessing.Pool`` and similar workers.  Resist adding
+  any further runtime deps (pandas, scipy, jax, etc.) unless
+  there's a hard requirement that can't be met without.
 
 ### Tooling
 
@@ -238,9 +244,6 @@ These need Ethan's input before any code lands:
 - **`bootstrap_dgp`'s scheme taxonomy**: start narrow (iid,
   cluster_block), grow on demand.  New schemes should be discussed
   before being added — the Protocol's minimality is the constraint.
-- **Pickle semantics for parametric DGPs with closure-based
-  generators**: cloudpickle support could be added but introduces
-  an optional dependency.  Discuss before adding.
 - **Whether to add a top-level `draws(dgp, n)` convenience**
   that batches `draw()` calls.  The design note says "no --
   plurality is the caller's concern."  Do not add it without
