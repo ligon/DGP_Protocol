@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import scipy.stats as st
+
 from dgp_protocol import (
     AnalyticUnavailable,
     ClusteredSampling,

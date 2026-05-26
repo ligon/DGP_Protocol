@@ -71,8 +71,8 @@ if __package__ is None and __name__ == "__main__":
     __package__ = "examples"
 
 import numpy as np
-from dgp_protocol import DataGeneratingProcess, ParametricDGP
 
+from dgp_protocol import DataGeneratingProcess, ParametricDGP
 from examples.fair_coin import DEFAULT_SHAPE
 from examples.fair_coin import OBSERVATION as X_OBSERVATION
 from examples.fair_coin import dgp as coin_dgp
