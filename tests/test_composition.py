@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+
 from dgp_protocol import (
     DataGeneratingProcess,
     EmpiricalDGP,
@@ -202,6 +203,134 @@ def test_with_data_raises_for_dgp_without_method() -> None:
     assert isinstance(dgp, DataGeneratingProcess)
     with pytest.raises(TypeError, match="does not expose a with_data method"):
         with_data(dgp, "anything")
+
+
+# ---------------------------------------------------------------------------
+# Three-stage non-degenerate composition: chars actually flow through.
+# ---------------------------------------------------------------------------
+def test_two_stage_three_stage_non_degenerate() -> None:
+    """3-stage composition where chars at each level genuinely shape
+    the next level's draws (unlike the degenerate-zeros recursion test).
+
+    Structure: region -> schools-within-region -> students-within-school.
+    Within-school student noise is tiny relative to the region/school
+    separation, so per-region grand means should be tightly clustered
+    near the region's mean characteristic.
+    """
+
+    # Two regions with very different mean characteristics.  Use a
+    # deterministic outer generator (no bootstrap) so realization[0]
+    # is always region 0 and realization[1] is always region 1; that
+    # lets the assertions below check per-region values by index.
+    def region_gen(rng, shape):
+        del rng, shape
+        return np.array([[10.0], [-10.0]])
+
+    region_dgp = ParametricDGP(generator=region_gen, default_shape=(2, 1), seed=0)
+
+    def make_region_inner(region_chars_row, region_rng):
+        # Within this region: 3 schools with means region_mean - 1, +0, +1.
+        # Use a deterministic generator here too so realization[r][s]
+        # corresponds to school s of region r in a known order.
+        region_mean = float(region_chars_row[0])
+
+        def schools_gen(rng, shape):
+            del rng, shape
+            return region_mean + np.array([[-1.0], [0.0], [1.0]])
+
+        school_dgp = ParametricDGP(generator=schools_gen, default_shape=(3, 1), seed=0)
+
+        def make_school_inner(school_chars_row, school_rng):
+            school_mean = float(school_chars_row[0])
+            return ParametricDGP(
+                generator=lambda r, sh: school_mean + 0.1 * r.standard_normal(sh),
+                default_shape=(4, 1),
+            ).with_rng(school_rng)
+
+        return TwoStageDGP(outer=school_dgp, inner=make_school_inner).with_rng(
+            region_rng
+        )
+
+    three_stage = TwoStageDGP(outer=region_dgp, inner=make_region_inner, seed=42)
+    realization = three_stage.draw()
+
+    # Structure: 2 regions, each a list of 3 schools, each a (4, 1) array.
+    assert isinstance(realization, list)
+    assert len(realization) == 2
+    for region_outcome in realization:
+        assert isinstance(region_outcome, list)
+        assert len(region_outcome) == 3
+        for school_outcome in region_outcome:
+            assert school_outcome.shape == (4, 1)
+
+    # Non-degeneracy: chars actually flow through.  Per-region grand
+    # mean is the avg of 3 school means (region_mean - 1, +0, +1) plus
+    # tiny (0.1-scale) student noise -> very near region_mean.
+    region_0_mean = float(np.mean([s.mean() for s in realization[0]]))
+    region_1_mean = float(np.mean([s.mean() for s in realization[1]]))
+    assert abs(region_0_mean - 10.0) < 0.5
+    assert abs(region_1_mean - (-10.0)) < 0.5
+
+    # Within each region, the 3 schools sit at region_mean +/- 1
+    # (visible in the per-school means up to within-school noise).
+    school_means_region_0 = sorted(float(s.mean()) for s in realization[0])
+    assert abs(school_means_region_0[0] - 9.0) < 0.3
+    assert abs(school_means_region_0[1] - 10.0) < 0.3
+    assert abs(school_means_region_0[2] - 11.0) < 0.3
+
+    # Determinism: rebuilding with identical seeds yields identical
+    # realizations all the way down the tree.
+    region_dgp_b = ParametricDGP(generator=region_gen, default_shape=(2, 1), seed=0)
+    three_stage_b = TwoStageDGP(outer=region_dgp_b, inner=make_region_inner, seed=42)
+    realization_b = three_stage_b.draw()
+    assert len(realization) == len(realization_b)
+    for ra, rb in zip(realization, realization_b, strict=True):
+        assert len(ra) == len(rb)
+        for sa, sb in zip(ra, rb, strict=True):
+            np.testing.assert_array_equal(sa, sb)
+
+
+# ---------------------------------------------------------------------------
+# Free with_data: swap-and-refit pattern
+# ---------------------------------------------------------------------------
+def test_with_data_free_function_supports_swap_and_refit() -> None:
+    """The canonical bootstrap-orchestration idiom:
+    1. draw a bootstrap resample,
+    2. wrap it via the free ``with_data(dgp, resample)``,
+    3. the rebound DGP carries the resample and has an independent
+       (spawned) draw stream so the parent is unaffected.
+
+    Tests both the free-function dispatch and the spawn-on-with_data
+    semantics together in the realistic shape consumers would use.
+    """
+
+    obs = np.arange(20).reshape(5, 4).astype(float)
+    parent = EmpiricalDGP(observation=obs, seed=0)
+
+    # Step 1: draw a bootstrap resample.
+    resample = parent.draw()
+    assert resample.shape == obs.shape
+
+    # Step 2: wrap via the FREE function (not the method).
+    refit = with_data(parent, resample)
+
+    # Step 3a: the refit DGP carries the resample, structural attrs preserved.
+    assert refit.data is resample
+    assert parent.data is obs  # parent unchanged
+    assert refit.sampling is parent.sampling
+
+    # Step 3b: spawn semantics -- drawing from refit doesn't consume
+    # parent's stream.  Reconstructing the parent with the same seed
+    # and exhausting the same number of draws (without any refit-side
+    # activity) reproduces the parent's post-resample draws.
+    parent_post = parent.draw()
+    _ = [refit.draw() for _ in range(3)]  # refit-side draws
+    parent_post_2 = parent.draw()
+
+    fresh_parent = EmpiricalDGP(observation=obs, seed=0)
+    _ = fresh_parent.draw()  # corresponds to ``resample``
+    np.testing.assert_array_equal(fresh_parent.draw(), parent_post)
+    np.testing.assert_array_equal(fresh_parent.draw(), parent_post_2)
 
 
 # ---------------------------------------------------------------------------

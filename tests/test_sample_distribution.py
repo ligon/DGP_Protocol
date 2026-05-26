@@ -10,8 +10,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import scipy.stats as st
+
 from dgp_protocol import (
     AnalyticUnavailable,
+    ClusteredSampling,
     EmpiricalDGP,
     NumericalWarning,
     ParametricDGP,
@@ -231,6 +233,92 @@ def test_sd_expect_for_twostage_with_flat_aggregator() -> None:
     )
     assert val.shape == (2,)
     np.testing.assert_allclose(val, np.zeros(2), atol=0.4)
+
+
+# ---------------------------------------------------------------------------
+# EmpiricalDGP under ClusteredSampling: cluster-block bootstrap path
+# ---------------------------------------------------------------------------
+def _make_clustered_observation(seed: int = 2029):
+    """Synthesize an observation with positive intra-cluster correlation.
+
+    10 clusters of 5 rows each (50 rows total, 2 columns).  Each cluster
+    carries a cluster-level offset on top of within-cluster iid noise,
+    so rows within a cluster are positively correlated; rows across
+    clusters are independent.
+    """
+
+    rng = np.random.default_rng(seed)
+    n_clusters = 10
+    rows_per_cluster = 5
+    cluster_offsets = 0.8 * rng.standard_normal(size=(n_clusters, 2))
+    within_noise = 0.6 * rng.standard_normal(size=(n_clusters * rows_per_cluster, 2))
+    cluster_ids = np.repeat(np.arange(n_clusters), rows_per_cluster)
+    observation = cluster_offsets[cluster_ids] + within_noise
+    return observation, cluster_ids
+
+
+def test_sd_expect_for_empirical_cluster_bootstrap() -> None:
+    """sample_distribution.expect works for ClusteredSampling EmpiricalDGP.
+
+    The cluster bootstrap is unbiased for the sample mean, so MC of
+    the column-mean statistic should converge to the data column-mean.
+    """
+
+    obs, cluster_ids = _make_clustered_observation()
+    cdgp = EmpiricalDGP(
+        observation=obs,
+        sampling=ClusteredSampling(cluster_ids=cluster_ids),
+        seed=0,
+    )
+    sample_mean = cdgp.sample_distribution.expect(
+        lambda r: r.mean(axis=0),
+        atol=0.05,
+        rtol=0.0,
+        max_its=3000,
+        batch_size=100,
+    )
+    np.testing.assert_allclose(sample_mean, obs.mean(axis=0), atol=0.15)
+
+
+def test_sd_moment_covariance_cluster_robust_exceeds_iid() -> None:
+    """Cluster-robust omega_hat is visibly larger than iid omega_hat
+    when intra-cluster correlation is positive.
+
+    Same observation, two sampling designs: the cluster-bootstrap
+    moment-covariance preserves the within-cluster correlation, so the
+    moment-vector sampling variance is larger than what the
+    (mis-specified) iid bootstrap would estimate.
+    """
+
+    obs, cluster_ids = _make_clustered_observation()
+    iid_dgp = EmpiricalDGP(observation=obs, seed=0)
+    clustered_dgp = EmpiricalDGP(
+        observation=obs,
+        sampling=ClusteredSampling(cluster_ids=cluster_ids),
+        seed=0,
+    )
+
+    theta = obs.mean(axis=0)
+
+    def gi(theta, X):
+        return X - theta
+
+    omega_iid = iid_dgp.sample_distribution.moment_covariance(
+        theta=theta, gi=gi, atol=0.1, rtol=0.0, max_its=2000, batch_size=100
+    )
+    omega_cluster = clustered_dgp.sample_distribution.moment_covariance(
+        theta=theta, gi=gi, atol=0.1, rtol=0.0, max_its=2000, batch_size=100
+    )
+
+    # Both 2x2 positive-semidefinite; compare traces.  For this
+    # synthesized data the cluster-robust trace is empirically ~6x
+    # the iid trace; 1.5x is a generous lower bound.
+    trace_iid = float(np.trace(np.asarray(omega_iid)))
+    trace_cluster = float(np.trace(np.asarray(omega_cluster)))
+    assert trace_cluster > 1.5 * trace_iid, (
+        f"expected cluster-robust trace > 1.5 * iid trace; "
+        f"got cluster={trace_cluster:.3f}, iid={trace_iid:.3f}"
+    )
 
 
 # ---------------------------------------------------------------------------
