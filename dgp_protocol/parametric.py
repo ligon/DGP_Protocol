@@ -22,8 +22,8 @@ distribution's analytic methods / attributes (scipy.stats-style;
 duck-typed).  When ``generator`` is supplied or the analytic
 attribute is absent, the methods raise
 :class:`~dgp_protocol.exceptions.AnalyticUnavailable` -- the free
-functions in :mod:`dgp_protocol.expect` catch this and fall back to
-adaptive Monte Carlo.
+functions in :mod:`dgp_protocol.marginal` catch this and fall back
+to adaptive Monte Carlo.
 
 Typical use cases:
 
@@ -178,10 +178,9 @@ class ParametricDGP:
         raise AnalyticUnavailable(
             "ParametricDGP.expect: no analytic backend "
             "(distribution=None or distribution lacks .expect).  Use "
-            "the free function dgp_protocol.expect.expect(dgp, func) "
-            "for the Monte Carlo fallback, or "
-            "dgp.sample_distribution.expect(stat_func) for dataset-"
-            "level operations."
+            "the free function dgp_protocol.expect(dgp, func) for the "
+            "Monte Carlo fallback, or dgp.sample_distribution.expect("
+            "stat_func) for dataset-level operations."
         )
 
     def mean(self, **kwargs: Any) -> Any:
@@ -209,7 +208,7 @@ class ParametricDGP:
             raise AnalyticUnavailable(
                 f"ParametricDGP.{name}: no analytic backend "
                 f"(generator-based DGP).  Use the free function "
-                f"dgp_protocol.expect.{name}(dgp) for the Monte Carlo "
+                f"dgp_protocol.{name}(dgp) for the Monte Carlo "
                 f"fallback."
             )
         value, found = try_analytic(self.distribution, name)
@@ -218,7 +217,7 @@ class ParametricDGP:
                 f"ParametricDGP.{name}: backend "
                 f"{type(self.distribution).__name__} exposes no "
                 f".{name} attribute.  Use the free function "
-                f"dgp_protocol.expect.{name}(dgp) for the Monte Carlo "
+                f"dgp_protocol.{name}(dgp) for the Monte Carlo "
                 f"fallback."
             )
         return value
