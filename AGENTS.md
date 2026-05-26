@@ -111,13 +111,35 @@ substantial discussion behind them in the design note.
 DGP_Protocol exists because ManifoldGMM needed it, but ManifoldGMM
 is one consumer of many that the design accommodates.  Know:
 
-- **ManifoldGMM does not yet depend on DGP_Protocol.**  The
-  consumer-side migration is documented in the design note but not
-  implemented.  ManifoldGMM's existing `MomentRestriction(data=array,
-  clusters=...)` surface is the *legacy* form; the *target* form is
-  `MomentRestriction(gi_jax=..., manifold=...)` + a separate
-  `EmpiricalDGP(observation=array, sampling=ClusteredSampling(...))`
-  passed alongside.
+- **ManifoldGMM's `v2-dgp` branch actively consumes DGP_Protocol.**
+  `pyproject.toml` lists `DGP_Protocol>=0.1.0a0` and uses a local
+  `develop = true` path during pre-release iteration.  The v2 path
+  is ``GMM(moment_func=gi_jax, dgp=..., manifold=...)``; the v1
+  path (`MomentRestriction(data=array, clusters=...)`) remains as
+  a deprecation alias.  Key consumption sites to know when changing
+  our surface:
+  - `gmm.py` uses `dgp.with_rng(s) for s in parent_rng.spawn(B)`
+    for parallel bootstrap fan-out.
+  - `gmm.py` uses `dgp.with_data(dgp.draw())` for swap-and-refit
+    bootstrap orchestration.
+  - `bootstrap.py` uses ``cloudpickle`` as a defensive pickle
+    fallback; with our `__reduce__` overrides their fallback path
+    no longer fires for DGP_Protocol objects, but it remains
+    relevant for user code with its own closures.
+  - `MomentRestriction.omega_hat(theta)` still lives in the Model
+    layer (not yet migrated to `dgp.sample_distribution.moment_covariance`);
+    blocked on us shipping the analytic `_sd_moment_covariance`
+    override (§6 deferred list).
+- **Examples are an informal downstream contract.**
+  ManifoldGMM's v2 tests directly import from our `examples/`:
+  `tests/v2/bernoulli_v2.py` does
+  ``from fair_coin import dgp as fair_coin_dgp`` and
+  `tests/v2/gaussian_mixture_v2.py` does
+  ``from coin_plus_noise import dgp as mixture_dgp``.  Renaming
+  the module-level `dgp` symbol, changing the bound `OBSERVATION`
+  seed, or restructuring those two example files will silently
+  shift ManifoldGMM's bootstrap distributions and break its
+  determinism tests.  Coordinate before touching them.
 - **Hypothetical future consumers** — an MLE package, an M-estimator
   package, a density-estimator package, a kernel-regression package
   — should be able to consume the same Protocol without DGP_Protocol
