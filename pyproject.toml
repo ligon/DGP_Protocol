@@ -2,14 +2,17 @@
 name = "DGP_Protocol"
 version = "0.1.0a0"
 description = "A Protocol for data-generating processes; minimal interface for analog-estimation toolkits."
-readme = "README.org"
+# README.md is generated from README.org by `pandoc -f org -t gfm
+# README.org -o README.md` (run automatically in the publish workflow;
+# see CONTRIBUTING.md for the local-build recipe).
+readme = "README.md"
 requires-python = ">=3.11,<4.0"
-license = { text = "BSD-3-Clause" }
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
 authors = [{ name = "Ethan Ligon", email = "ligon@berkeley.edu" }]
 classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",
-  "License :: OSI Approved :: BSD License",
   "Operating System :: OS Independent",
   "Topic :: Scientific/Engineering :: Mathematics",
 ]
@@ -17,6 +20,11 @@ dependencies = [
   "numpy>=1.26",
   "cloudpickle>=3.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/ligon/DGP_Protocol"
+Repository = "https://github.com/ligon/DGP_Protocol"
+Issues = "https://github.com/ligon/DGP_Protocol/issues"
 
 [tool.poetry]
 package-mode = true

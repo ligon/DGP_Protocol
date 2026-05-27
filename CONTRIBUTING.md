@@ -19,18 +19,27 @@ dependencies (pytest, ruff, black, mypy) are managed by poetry.
 
 ## Development workflow
 
-The four quality gates that must pass before a PR lands:
+A `Makefile` wraps the common flows -- run `make help` for the full
+catalog.  The four quality gates that must pass before a PR lands:
 
 ```sh
-poetry run ruff check .
-poetry run black --check .
-poetry run mypy dgp_protocol tests
-poetry run pytest
+make check          # = ruff + black-check + mypy + test
 ```
 
-If `black --check` fails, run `poetry run black .` to apply the
-formatting.  If `ruff` flags fixable issues, `poetry run ruff check
-. --fix` will resolve them.
+or, individually:
+
+```sh
+poetry run ruff check .          # make ruff
+poetry run black --check .       # make black-check
+poetry run mypy dgp_protocol tests   # make mypy
+poetry run pytest                # make test
+```
+
+To apply fixes in place:
+
+```sh
+make format         # ruff --fix + black .
+```
 
 ## Submitting a pull request
 
@@ -62,6 +71,71 @@ The conceptual framing for this package is captured in two places:
 If you're adding a feature that wouldn't be useful to any consumer
 *other than* ManifoldGMM, please file it on ManifoldGMM instead —
 this package stays estimator-agnostic by design.
+
+## Building and releasing
+
+### Local build
+
+The PyPI long-description is generated from `README.org` (which is the
+canonical doc) via pandoc.  The `make build` target chains that step
+in for you:
+
+```sh
+make build          # = pandoc README.org -> README.md, then poetry build
+```
+
+`README.md` is `.gitignore`d on purpose — the publish workflow
+regenerates it from `README.org` on every release.
+
+### Cutting a release
+
+The Makefile wraps the bump + tag flow.  A typical alpha → next-alpha
+release:
+
+```sh
+make bump-alpha               # 0.1.0a0 -> 0.1.0a1
+make release-check            # runs all quality gates + builds (dry run)
+v=$(make -s version)
+git commit -am "Release $v"
+git push
+make release-tag              # creates annotated tag for current version
+git push origin "v$v"
+```
+
+Other bump targets (`make help` for the full list):
+
+| Target | Effect | Underlying command |
+|---|---|---|
+| `bump-alpha` | `0.1.0a0 → 0.1.0a1` | `poetry version prerelease` |
+| `bump-beta` | `0.1.0a3 → 0.1.0b0` | `poetry version prerelease --next-phase` |
+| `bump-finalize` | `0.1.0a3 → 0.1.0` | `poetry version patch` |
+| `bump-patch` | `0.1.0 → 0.1.1a0` | `poetry version prepatch` |
+| `bump-minor` | `0.1.0 → 0.2.0a0` | `poetry version preminor` |
+| `bump-major` | `0.1.0 → 1.0.0a0` | `poetry version premajor` |
+| `bump-stable-{patch,minor,major}` | Stable → stable, no prerelease tag | `poetry version {patch,minor,major}` |
+
+The publish workflow triggers on any tag matching `v*`.  The `build`
+job runs unconditionally; the `publish-pypi` job runs only for tag
+pushes and published Releases.  Watch progress under the *Actions*
+tab.
+
+### One-time PyPI setup (trusted publishing)
+
+Before the first publish, register the repository as a trusted
+publisher on PyPI:
+
+1. Sign in at https://pypi.org/manage/account/publishing/.
+2. Click *Add a new pending publisher* and fill in:
+   - **Owner:** `ligon`
+   - **Repository:** `DGP_Protocol`
+   - **Workflow filename:** `publish.yml`
+   - **Environment:** `pypi`
+3. (Recommended) In GitHub, go to *Settings → Environments* and
+   create an environment named `pypi`.  Add yourself as a required
+   reviewer so that an actual publish requires manual approval.
+
+After the first successful run, PyPI promotes the pending publisher
+to a real one and no further setup is needed.
 
 ## Reporting issues
 
