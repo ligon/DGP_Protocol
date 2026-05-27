@@ -28,7 +28,11 @@ def test_explicit_sampling_none_is_coerced_to_iid() -> None:
     """
 
     obs = np.arange(12).reshape(3, 4).astype(float)
-    dgp = EmpiricalDGP(observation=obs, sampling=None)
+    # The whole point of this test is the deliberately-wrong ``None``
+    # input; mypy correctly flags it against the ``SamplingDesign``
+    # annotation, hence the local ignore.  See issue #2 for why a
+    # user might write this even though it doesn't type-check.
+    dgp = EmpiricalDGP(observation=obs, sampling=None)  # type: ignore[arg-type]
     assert isinstance(dgp.sampling, IIDSampling)
 
     # Omitting the kwarg already produces an ``IIDSampling`` instance
