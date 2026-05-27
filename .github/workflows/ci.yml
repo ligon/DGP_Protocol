@@ -35,6 +35,16 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-poetry-
 
+      # README.md is gitignored (generated from README.org by pandoc;
+      # see publish.yml).  pyproject.toml's readme = "README.md" makes
+      # `poetry install` require the file even in CI, so regenerate it
+      # here too.
+      - name: Install pandoc
+        run: sudo apt-get update && sudo apt-get install -y pandoc
+
+      - name: Generate README.md from README.org
+        run: pandoc -f org -t gfm README.org -o README.md
+
       - name: Install dependencies
         run: |
           poetry install --with dev
