@@ -16,6 +16,31 @@ def test_data_returns_frozen_observation() -> None:
     assert dgp.data is obs
 
 
+def test_explicit_sampling_none_is_coerced_to_iid() -> None:
+    """``sampling=None`` is coerced to a fresh ``IIDSampling()`` instance.
+
+    The dataclass declares ``sampling: SamplingDesign =
+    field(default_factory=IIDSampling)``, but the default_factory only
+    fires when the kwarg is omitted -- passing ``None`` explicitly
+    bypasses it.  Without ``__post_init__`` coercion, downstream
+    ``self.sampling.moment_covariance_estimator(...)`` would crash
+    with ``AttributeError: 'NoneType'``.  See issue #2.
+    """
+
+    obs = np.arange(12).reshape(3, 4).astype(float)
+    dgp = EmpiricalDGP(observation=obs, sampling=None)
+    assert isinstance(dgp.sampling, IIDSampling)
+
+    # Omitting the kwarg already produces an ``IIDSampling`` instance
+    # via the default_factory; ``None`` should be observationally
+    # equivalent to that.
+    dgp_default = EmpiricalDGP(observation=obs)
+    assert isinstance(dgp_default.sampling, IIDSampling)
+    # Two distinct instances (default_factory makes a fresh one per
+    # construction); the coercion does the same.
+    assert dgp.sampling is not dgp_default.sampling
+
+
 def test_draw_iid_returns_same_shape() -> None:
     """Default iid draw returns a matrix of the same shape as data."""
 

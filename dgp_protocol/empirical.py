@@ -81,6 +81,17 @@ class EmpiricalDGP:
     _rng: np.random.Generator = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
+        # ``field(default_factory=IIDSampling)`` only fires when the
+        # caller omits the kwarg; an explicit ``sampling=None`` bypasses
+        # it and would crash downstream in
+        # ``sampling.moment_covariance_estimator`` with an unhelpful
+        # ``AttributeError`` (see issue #2 and ManifoldGMM PR #54
+        # commit notes).  Coerce to the default so the type annotation
+        # (``SamplingDesign``, not ``Optional[SamplingDesign]``) stays
+        # honest.  ``object.__setattr__`` is required because the
+        # dataclass is frozen.
+        if self.sampling is None:
+            object.__setattr__(self, "sampling", IIDSampling())
         object.__setattr__(self, "_rng", np.random.default_rng(self.seed))
 
     @property
