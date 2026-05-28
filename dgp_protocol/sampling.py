@@ -58,6 +58,19 @@ class SamplingDesign(Protocol):
     - :meth:`moment_covariance_estimator`: closed-form
       ``Var_DGP[bar g_N(theta)]`` for the empirical distribution
       under the sampling design (no Monte Carlo).
+
+    Optional members consulted by the compositional surface in
+    :mod:`dgp_protocol.sample_distribution`:
+
+    - :meth:`cluster_score_blocks`: the per-i.i.d.-unit centered
+      moment-score blocks ``(G, k)`` satisfying
+      ``blocks.T @ blocks == hat Omega``.  When supplied, downstream
+      composites (e.g. :class:`~dgp_protocol.TwoStageDGP`) can derive
+      cluster-robust ``hat Omega`` for hierarchical compositions
+      without round-tripping through the full moment-covariance matrix.
+      Implementations of :class:`SamplingDesign` that do not supply
+      ``cluster_score_blocks`` are still usable via the existing
+      :meth:`moment_covariance_estimator` surface.
     """
 
     def bootstrap_resample(
@@ -279,6 +292,25 @@ class IIDSampling:
         idx = rng.integers(0, arr.shape[0], size=target_n)
         return arr[idx]
 
+    def cluster_score_blocks(
+        self,
+        observation: Any,
+        theta: Any,
+        gi: Callable[[Any, Any], Any],
+        *,
+        centered: bool = True,
+    ) -> Any:
+        """Centered, ``1/sqrt(N)``-scaled per-row moment scores ``(N, k)``.
+
+        Each row is its own i.i.d. unit under :class:`IIDSampling`, so
+        ``blocks.T @ blocks`` (with PSD projection) is exactly
+        :meth:`moment_covariance_estimator`'s output.
+        """
+
+        moments = _evaluate_moments(gi, theta, observation)
+        xp = _array_namespace(moments)
+        return _centered_scaled(moments, self.weights, centered, xp)
+
     def moment_covariance_estimator(
         self,
         observation: Any,
@@ -295,10 +327,11 @@ class IIDSampling:
         returns a numpy array.
         """
 
-        moments = _evaluate_moments(gi, theta, observation)
-        xp = _array_namespace(moments)
-        scaled = _centered_scaled(moments, self.weights, centered, xp)
-        omega = scaled.T @ scaled
+        blocks = self.cluster_score_blocks(
+            observation, theta, gi, centered=centered
+        )
+        xp = _array_namespace(blocks)
+        omega = blocks.T @ blocks
         return _project_psd(omega, xp)
 
 
@@ -359,6 +392,35 @@ class ClusteredSampling:
         row_indices = np.concatenate([rows_by_cluster[g] for g in sampled_clusters])
         return arr[row_indices]
 
+    def cluster_score_blocks(
+        self,
+        observation: Any,
+        theta: Any,
+        gi: Callable[[Any, Any], Any],
+        *,
+        centered: bool = True,
+    ) -> Any:
+        """Centered, ``1/sqrt(N)``-scaled per-cluster moment-sum scores ``(G, k)``.
+
+        Each row is one cluster's i.i.d. contribution under the cluster
+        bootstrap, so ``blocks.T @ blocks`` (with PSD projection) is
+        exactly :meth:`moment_covariance_estimator`'s output.
+        """
+
+        moments = _evaluate_moments(gi, theta, observation)
+        xp = _array_namespace(moments)
+
+        # Host-side cluster-id normalisation (theta-independent).
+        codes_np, num_clusters = _cluster_codes_numpy(self.cluster_ids)
+        if codes_np.size != moments.shape[0]:
+            raise ValueError(
+                f"cluster_ids has {codes_np.size} entries; expected "
+                f"{moments.shape[0]} (one per observation)."
+            )
+
+        scaled = _centered_scaled(moments, self.weights, centered, xp)
+        return _group_sum(scaled, codes_np, num_clusters, xp)
+
     def moment_covariance_estimator(
         self,
         observation: Any,
@@ -377,18 +439,9 @@ class ClusteredSampling:
         not on any autodiff path.
         """
 
-        moments = _evaluate_moments(gi, theta, observation)
-        xp = _array_namespace(moments)
-
-        # Host-side cluster-id normalisation (theta-independent).
-        codes_np, num_clusters = _cluster_codes_numpy(self.cluster_ids)
-        if codes_np.size != moments.shape[0]:
-            raise ValueError(
-                f"cluster_ids has {codes_np.size} entries; expected "
-                f"{moments.shape[0]} (one per observation)."
-            )
-
-        scaled = _centered_scaled(moments, self.weights, centered, xp)
-        grouped = _group_sum(scaled, codes_np, num_clusters, xp)
-        omega = grouped.T @ grouped
+        blocks = self.cluster_score_blocks(
+            observation, theta, gi, centered=centered
+        )
+        xp = _array_namespace(blocks)
+        omega = blocks.T @ blocks
         return _project_psd(omega, xp)

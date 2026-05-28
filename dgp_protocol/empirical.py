@@ -39,8 +39,9 @@ from typing import Any
 
 import numpy as np
 
+from .exceptions import AnalyticUnavailable
 from .sample_distribution import SampleDistribution
-from .sampling import IIDSampling, SamplingDesign
+from .sampling import IIDSampling, SamplingDesign, _array_namespace, _evaluate_moments
 
 
 @dataclass(frozen=True)
@@ -180,6 +181,33 @@ class EmpiricalDGP:
 
         return SampleDistribution(self)
 
+    def _sd_cluster_score_blocks(
+        self,
+        theta: Any,
+        gi: Any,
+        *,
+        centered: bool = True,
+        **kwargs: Any,
+    ) -> Any:
+        """Per-i.i.d.-unit centered moment-score blocks ``(G, k)``.
+
+        Delegates to ``self.sampling.cluster_score_blocks`` when the
+        sampling design exposes it (the built-in :class:`IIDSampling`
+        and :class:`ClusteredSampling` both do).  Falls back to the
+        legacy ``moment_covariance_estimator`` -> raise path for
+        user-defined sampling designs that pre-date the blocks surface.
+        """
+
+        del kwargs  # MC-control kwargs are not applicable to the analytic path.
+        blocks_method = getattr(self.sampling, "cluster_score_blocks", None)
+        if callable(blocks_method):
+            return blocks_method(self.observation, theta, gi, centered=centered)
+        raise AnalyticUnavailable(
+            f"EmpiricalDGP._sd_cluster_score_blocks: sampling design "
+            f"{type(self.sampling).__name__} does not expose "
+            f"cluster_score_blocks; falling back via _sd_moment_covariance."
+        )
+
     def _sd_moment_covariance(
         self,
         theta: Any,
@@ -198,12 +226,45 @@ class EmpiricalDGP:
         kwargs (``atol``, ``rtol``, ``max_its``, ``batch_size``) are
         silently ignored -- this is the analytic path, no convergence
         loop applies.
+
+        Retained for compatibility with user-defined sampling designs
+        that pre-date the :meth:`_sd_cluster_score_blocks` surface;
+        :class:`~dgp_protocol.SampleDistribution.moment_covariance`
+        prefers the blocks hook when both are present.
         """
 
         centered = kwargs.get("centered", True)
         return self.sampling.moment_covariance_estimator(
             self.observation, theta, gi, centered=centered
         )
+
+    def _sd_within_cluster_block(
+        self,
+        theta: Any,
+        gi: Any,
+    ) -> Any:
+        """Raw moment sum ``Σ_i g_i(θ, X_i)`` over the bound observation.
+
+        The within-cluster primitive consumed by :class:`TwoStageDGP`
+        when composing per-outer-cluster blocks: the composite asks
+        each inner DGP for its uncentered, unscaled moment sum and
+        does its own centering / scaling against the global ``N``.
+        Distinct from :meth:`_sd_cluster_score_blocks` (which is the
+        full ``(G, k)`` prepared-blocks surface consumed by
+        :class:`SampleDistribution`).
+
+        Raises :class:`AnalyticUnavailable` when ``self.observation``
+        is ``None``.
+        """
+
+        if self.observation is None:
+            raise AnalyticUnavailable(
+                "EmpiricalDGP._sd_within_cluster_block: observation is "
+                "None; bind one via .with_data(obs) before composing."
+            )
+        moments = _evaluate_moments(gi, theta, self.observation)
+        xp = _array_namespace(moments)
+        return xp.nansum(moments, axis=0)
 
     # ------------------------------------------------------------------
     # Lineage operations.

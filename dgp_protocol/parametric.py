@@ -276,8 +276,86 @@ class ParametricDGP:
         return new
 
     # ------------------------------------------------------------------
-    # D-side analytic hook: delegates to ``sampling`` when supplied.
+    # D-side analytic hooks.
     # ------------------------------------------------------------------
+    def _sd_cluster_score_blocks(
+        self,
+        theta: Any,
+        gi: Any,
+        *,
+        centered: bool = True,
+        **kwargs: Any,
+    ) -> Any:
+        """Per-i.i.d.-unit centered moment-score blocks ``(G, k)``.
+
+        Available when both ``sampling`` and ``observation`` are
+        supplied at construction; delegates to
+        ``sampling.cluster_score_blocks(observation, theta, gi,
+        centered=...)``.  Raises :class:`AnalyticUnavailable` when
+        either is missing (or when the sampling design pre-dates the
+        blocks surface), which the
+        :meth:`~dgp_protocol.SampleDistribution.moment_covariance`
+        dispatch catches and falls through to
+        :meth:`_sd_moment_covariance` or MC.
+        """
+
+        del kwargs
+        if self.sampling is None:
+            raise AnalyticUnavailable(
+                "ParametricDGP._sd_cluster_score_blocks: no sampling "
+                "design declared.  Construct with sampling=... to "
+                "enable the analytic blocks surface, or rely on MC."
+            )
+        if self.observation is None:
+            raise AnalyticUnavailable(
+                "ParametricDGP._sd_cluster_score_blocks: no observation "
+                "bound. Bind via observation= or .with_data(obs)."
+            )
+        blocks_method = getattr(self.sampling, "cluster_score_blocks", None)
+        if not callable(blocks_method):
+            raise AnalyticUnavailable(
+                f"ParametricDGP._sd_cluster_score_blocks: sampling "
+                f"design {type(self.sampling).__name__} does not "
+                f"expose cluster_score_blocks."
+            )
+        return blocks_method(self.observation, theta, gi, centered=centered)
+
+    def _sd_within_cluster_block(
+        self,
+        theta: Any,
+        gi: Any,
+    ) -> Any:
+        """Raw moment sum ``n · E_inner[g(θ, X)]`` where ``n = len(observation)``.
+
+        Within-cluster primitive consumed by :class:`TwoStageDGP` when
+        the parametric inner is bound to its observed block via
+        :meth:`with_data`: the composite asks each inner for its
+        per-cluster moment sum.  For a parametric inner, that sum is
+        ``n · μ(θ)`` where ``μ(θ) = E_inner[g(θ, X)]`` is the
+        analytic expectation under the inner distribution.
+
+        Raises :class:`AnalyticUnavailable` when ``self.observation``
+        is ``None`` or when the inner distribution has no analytic
+        :meth:`expect` (the composite then falls back to a direct
+        row-sum on the observed block).
+        """
+
+        if self.observation is None:
+            raise AnalyticUnavailable(
+                "ParametricDGP._sd_within_cluster_block: observation "
+                "is None; bind one via .with_data(obs) before composing."
+            )
+        observation = self.observation
+        # try_analytic-style: ParametricDGP.expect raises AnalyticUnavailable
+        # when no distribution.expect is available; propagate that.
+        mu = self.expect(lambda x: gi(theta, x))
+        mu_arr = np.asarray(mu, dtype=float)
+        try:
+            n = int(np.asarray(observation).shape[0])
+        except (AttributeError, IndexError):
+            n = len(observation)
+        return n * mu_arr
+
     def _sd_moment_covariance(
         self,
         theta: Any,

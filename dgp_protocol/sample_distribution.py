@@ -16,6 +16,13 @@ distribution over datasets.  Cousin methods:
   primitive ``Var_DGP[ḡ_N(θ)]`` for the sample moment vector
   ``ḡ_N = (1/sqrt(N)) Σ_i g_i(θ, X_i)``.  ManifoldGMM's ``omega_hat``
   consumes this when present.
+- :meth:`SampleDistribution.cluster_score_blocks`: the per-i.i.d.-unit
+  centered moment-score blocks ``(G, k)`` satisfying
+  ``blocks.T @ blocks == hat Omega``.  This is the compositional
+  primitive: hierarchical DGPs (e.g. :class:`~dgp_protocol.TwoStageDGP`)
+  derive their own ``hat Omega`` by assembling per-cluster blocks
+  from this surface on their inner DGPs.  ``moment_covariance``
+  itself is now derived: ``blocks.T @ blocks`` with PSD projection.
 
 Use cases:
 
@@ -27,9 +34,15 @@ Use cases:
 The view is constructed lazily by ``dgp.sample_distribution`` (a
 ``@property`` on each container).  Concrete DGPs may supply analytic
 overrides via private hook methods on themselves
-(``_sd_expect``, ``_sd_cov``, ``_sd_moment_covariance``); the view
-detects them via :func:`hasattr` and falls back to adaptive MC
-otherwise.  Following the dispatch convention shared with
+(``_sd_expect``, ``_sd_cov``, ``_sd_cluster_score_blocks``,
+``_sd_moment_covariance``); the view detects them via
+:func:`hasattr` and falls back to adaptive MC otherwise.
+``_sd_cluster_score_blocks`` is preferred over ``_sd_moment_covariance``:
+when both are defined the blocks hook drives ``moment_covariance``
+(via ``blocks.T @ blocks`` + PSD projection), so concrete types only
+need to provide the blocks hook and the matrix is derived.  The
+``_sd_moment_covariance`` hook is retained for backward compat with
+user-defined DGPs.  Following the dispatch convention shared with
 :mod:`dgp_protocol.expect`:
 
 - A hook that raises
@@ -182,6 +195,38 @@ class SampleDistribution:
         return cov_arr
 
     # ------------------------------------------------------------------
+    # cluster_score_blocks: (G, k) per-i.i.d.-unit centered moment scores.
+    # ------------------------------------------------------------------
+    def cluster_score_blocks(
+        self,
+        theta: Any,
+        gi: Callable[[Any, Any], Any],
+        *,
+        centered: bool = True,
+        **kwargs: Any,
+    ) -> Any:
+        """Per-i.i.d.-unit centered moment-score blocks ``(G, k)``.
+
+        Satisfies ``blocks.T @ blocks == hat Omega`` (up to PSD
+        projection).  Tries ``dgp._sd_cluster_score_blocks(theta, gi,
+        centered=..., **kw)`` if available; raises
+        :class:`AnalyticUnavailable` otherwise.  The compositional
+        primitive consumed by hierarchical DGPs to assemble their own
+        ``hat Omega`` without losing the per-cluster structure.
+        """
+
+        hook = getattr(self._dgp, "_sd_cluster_score_blocks", None)
+        if callable(hook):
+            return hook(theta, gi, centered=centered, **kwargs)
+        raise AnalyticUnavailable(
+            f"{type(self._dgp).__name__}.cluster_score_blocks: no "
+            f"_sd_cluster_score_blocks hook on the DGP.  Use "
+            f"sample_distribution.moment_covariance for the full "
+            f"matrix (which has its own MC fallback), or supply the "
+            f"hook on the concrete DGP type."
+        )
+
+    # ------------------------------------------------------------------
     # moment_covariance: Var_DGP[g_bar_N(theta)]
     # ------------------------------------------------------------------
     def moment_covariance(
@@ -198,11 +243,29 @@ class SampleDistribution:
         ``(k, k)``-shaped sampling covariance under the DGP's
         distribution over datasets.
 
-        Tries ``dgp._sd_moment_covariance(theta, gi, **kw)`` first
-        (the analytic path for, e.g., iid / cluster-robust outer
-        products); otherwise MC fallback: build ``g_bar`` per draw,
-        take the sample covariance over draws.
+        Dispatch order:
+
+        1. ``dgp._sd_cluster_score_blocks(theta, gi, ...)`` if defined --
+           returns ``(G, k)`` blocks; ``hat Omega = blocks.T @ blocks``
+           with PSD projection.  This is the preferred analytic path.
+        2. ``dgp._sd_moment_covariance(theta, gi, ...)`` if defined --
+           legacy direct-matrix hook, retained for back-compat with
+           user-defined DGPs.
+        3. MC fallback: build ``g_bar`` per draw, take the sample
+           covariance over draws.
         """
+
+        from .sampling import _array_namespace, _project_psd  # local: avoid cycle
+
+        blocks_hook = getattr(self._dgp, "_sd_cluster_score_blocks", None)
+        if callable(blocks_hook):
+            try:
+                blocks = blocks_hook(theta, gi, **kwargs)
+                xp = _array_namespace(blocks)
+                omega = blocks.T @ blocks
+                return _project_psd(omega, xp)
+            except AnalyticUnavailable:
+                pass
 
         hook = getattr(self._dgp, "_sd_moment_covariance", None)
         if callable(hook):
