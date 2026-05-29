@@ -125,7 +125,7 @@ def test_two_stage_recursive_composition() -> None:
 
 
 def test_two_stage_with_data_preserves_structure() -> None:
-    """``with_data`` on a TwoStageDGP rebinds observation but keeps outer/inner."""
+    """``with_data`` on a TwoStageDGP rebinds inner_observations but keeps outer/inner."""
 
     cluster_chars = np.array([[1.0], [2.0]])
     outer = EmpiricalDGP(observation=cluster_chars)
@@ -137,13 +137,14 @@ def test_two_stage_with_data_preserves_structure() -> None:
         ).with_rng(rng)
 
     ts1 = TwoStageDGP(outer=outer, inner=make_inner)
-    fake_realization = ("placeholder", "object")
-    ts2 = ts1.with_data(fake_realization)
+    new_inner_obs = [np.array([[1.5]]), np.array([[2.5], [3.5]])]
+    ts2 = ts1.with_data(new_inner_obs)
 
     assert ts2 is not ts1
     assert ts2.outer is ts1.outer
     assert ts2.inner is ts1.inner
-    assert ts2.data == fake_realization
+    # .data is the stitched flat matrix (the composite owns the stitch).
+    np.testing.assert_array_equal(ts2.data, np.vstack(new_inner_obs))
     assert ts1.data is None  # unchanged
 
 
