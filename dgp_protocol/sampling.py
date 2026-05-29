@@ -327,9 +327,7 @@ class IIDSampling:
         returns a numpy array.
         """
 
-        blocks = self.cluster_score_blocks(
-            observation, theta, gi, centered=centered
-        )
+        blocks = self.cluster_score_blocks(observation, theta, gi, centered=centered)
         xp = _array_namespace(blocks)
         omega = blocks.T @ blocks
         return _project_psd(omega, xp)
@@ -439,9 +437,7 @@ class ClusteredSampling:
         not on any autodiff path.
         """
 
-        blocks = self.cluster_score_blocks(
-            observation, theta, gi, centered=centered
-        )
+        blocks = self.cluster_score_blocks(observation, theta, gi, centered=centered)
         xp = _array_namespace(blocks)
         omega = blocks.T @ blocks
         return _project_psd(omega, xp)

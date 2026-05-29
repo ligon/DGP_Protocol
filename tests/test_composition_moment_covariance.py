@@ -82,9 +82,9 @@ def test_twostage_empirical_inner_matches_clustered_empirical() -> None:
         # _sd_within_cluster_block.  The factory just needs to return
         # the right inner type.
         del chars
-        return EmpiricalDGP(observation=np.empty((0, stitched.shape[1])), seed=0).with_rng(
-            rng
-        )
+        return EmpiricalDGP(
+            observation=np.empty((0, stitched.shape[1])), seed=0
+        ).with_rng(rng)
 
     ts = TwoStageDGP(
         outer=EmpiricalDGP(observation=outer_obs, seed=0),
@@ -100,7 +100,9 @@ def test_twostage_empirical_inner_matches_clustered_empirical() -> None:
         seed=0,
     )
 
-    omega_composite = ts.sample_distribution.moment_covariance(theta=None, gi=_gi_identity)
+    omega_composite = ts.sample_distribution.moment_covariance(
+        theta=None, gi=_gi_identity
+    )
     omega_flat = flat.sample_distribution.moment_covariance(theta=None, gi=_gi_identity)
 
     np.testing.assert_allclose(omega_composite, omega_flat, rtol=1e-10, atol=1e-12)
@@ -136,7 +138,9 @@ def test_twostage_empirical_inner_fallback_without_hook_matches() -> None:
         seed=0,
     )
 
-    omega_composite = ts.sample_distribution.moment_covariance(theta=None, gi=_gi_identity)
+    omega_composite = ts.sample_distribution.moment_covariance(
+        theta=None, gi=_gi_identity
+    )
     omega_flat = flat.sample_distribution.moment_covariance(theta=None, gi=_gi_identity)
 
     np.testing.assert_allclose(omega_composite, omega_flat, rtol=1e-10, atol=1e-12)
@@ -164,8 +168,12 @@ def test_twostage_iid_limit_when_each_cluster_has_one_row() -> None:
     )
     iid_flat = EmpiricalDGP(observation=stitched, sampling=IIDSampling(), seed=0)
 
-    omega_composite = ts.sample_distribution.moment_covariance(theta=None, gi=_gi_identity)
-    omega_iid = iid_flat.sample_distribution.moment_covariance(theta=None, gi=_gi_identity)
+    omega_composite = ts.sample_distribution.moment_covariance(
+        theta=None, gi=_gi_identity
+    )
+    omega_iid = iid_flat.sample_distribution.moment_covariance(
+        theta=None, gi=_gi_identity
+    )
 
     np.testing.assert_allclose(omega_composite, omega_iid, rtol=1e-10, atol=1e-12)
 
@@ -207,9 +215,7 @@ def test_twostage_parametric_inner_uses_analytic_expect() -> None:
         seed=0,
     )
 
-    blocks = ts.sample_distribution.cluster_score_blocks(
-        theta=None, gi=_gi_identity
-    )
+    blocks = ts.sample_distribution.cluster_score_blocks(theta=None, gi=_gi_identity)
 
     # Expected raw cluster sums S_c = n_c * mu_c = 3 * c_chars.
     raw_sums = np.array([sizes[c] * outer_obs[c, 0] for c in range(len(sizes))])

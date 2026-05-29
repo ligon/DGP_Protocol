@@ -183,7 +183,9 @@ class TwoStageDGP:
                         f"entries; they must agree (one inner block "
                         f"per outer cluster row)."
                     )
-            stitched = np.vstack([np.asarray(o) for o in inner_obs]) if inner_obs else None
+            stitched = (
+                np.vstack([np.asarray(o) for o in inner_obs]) if inner_obs else None
+            )
             object.__setattr__(self, "_stitched", stitched)
             object.__setattr__(self, "_cluster_sizes", cluster_sizes)
         else:
